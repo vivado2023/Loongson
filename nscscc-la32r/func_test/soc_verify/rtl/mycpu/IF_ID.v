@@ -9,11 +9,13 @@ module IF_ID (
 
     input  wire         valid_in,
     input  wire [31:0]  pc_in   ,
+    output reg          valid_out,
     output reg  [31:0]  pc_out  
 );
 
     always @(posedge cpu_clk) begin
-        pc_out <= !cpu_rstn ? 32'h0 : (suspend | !valid_in) ? pc_out : pc_in;
+        valid_out <= !cpu_rstn ? 1'b0 : (suspend) ? valid_out : valid_in;
+        pc_out <= !cpu_rstn ? 32'h0 : (suspend) ? pc_out : pc_in;
     end
 
 endmodule

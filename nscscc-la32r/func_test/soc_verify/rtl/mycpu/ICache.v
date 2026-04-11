@@ -132,7 +132,8 @@ module ICache (
         else if (current_state == RD_MEM)  miss_offset <= offset[OFFSET_WID-1:2];
     end
 
-    wire miss_hit = (current_state == REFILL) && dev_rvalid_r && (recv_cnt-1 == miss_offset) && !pred_error;
+    wire miss_hit = (current_state == REFILL) && dev_rvalid_r && (recv_cnt-1 == offset[OFFSET_WID-1:2]) && !pred_error
+                    && (tag_from_cpu_wr == tag_from_cpu) && (cache_idx_wr == cache_index_r); 
 
     reg ld_st;
     always @(posedge cpu_clk or negedge cpu_rstn) begin

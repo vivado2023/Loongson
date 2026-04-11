@@ -98,11 +98,15 @@ module myCPU (
     wire [ 4:0] wb_wR        ;      // WB阶段的目的寄存器
     wire [31:0] wb_wd        ;      // WB阶段的写回数据
 
+    reg ififo_full_r;
+    always @(posedge cpu_clk) begin
+        ififo_full_r <= ififo_full;
+    end
+
     wire        pl_suspend    = ldst_suspend | ex_suspend;       // 流水线暂停信号
     // 出现多周期指令(访存、乘除法)暂停取指, 多周期操作结束后继续取指
-    wire        pause_ifetch  = (ldst_suspend | id_is_ld_st | ex_is_ld_st | ex_suspend | id_is_mul_div) & 
-                                !ldst_done & !mul_div_done;
-    wire        resume_ifetch = ldst_done | mul_div_done;          // 恢复取指
+    wire        pause_ifetch  = ififo_full;
+    wire        resume_ifetch = ififo_full_r && !ififo_full && ifetch_inst != 32'h0;          // 恢复取指
     
     BPU u_BPU (
         .cpu_clk        (cpu_clk      ),
@@ -110,7 +114,7 @@ module myCPU (
         .if_pc          (if_pc        ),
         .if_valid       (if_valid     ),
         .id_valid       (id_valid     ),
-        .pl_suspend     (pl_suspend   ),
+        .pl_suspend     (1'b0         ),
         // predicted branch dir. and target
         .pred_target    (pred_target  ),
         .pred_error     (pred_error   ),
@@ -122,13 +126,14 @@ module myCPU (
         .real_target    (if_npc       )
     );
 
+wire [31:0] if_pc_r;
     IF_stage IF (
         .cpu_rstn       (cpu_rstn     ),
         .cpu_clk        (cpu_clk      ),
         // pipeline control
         .pause_ifetch   (pause_ifetch ),
         .resume_ifetch  (resume_ifetch),
-        .pl_suspend     (pl_suspend   ),
+        .pl_suspend     (1'b0         ),
         // From BPU
         .pred_error     (pred_error   ),
         .pred_target    (pred_target  ),
@@ -143,12 +148,37 @@ module myCPU (
         // To ID
         .if_valid       (if_valid     ),
         .if_pc          (if_pc        ),
+        .if_pc_r        (if_pc_r      ),
         .if_npc         (if_npc       ),
         // Instruction Fetch Interface
         .ifetch_rreq    (ifetch_rreq  ),
         .ifetch_addr    (ifetch_addr  ),
         .ifetch_valid   (ifetch_valid )
     );
+
+wire [31:0] ififo_inst_out;
+wire        ififo_valid;
+wire        ififo_full;
+wire        id_ifetch_valid;
+wire [31:0] ififo_pc_out;
+
+    Ififo u_Ififo (
+        .cpu_rstn       (cpu_rstn     ),
+        .cpu_clk        (cpu_clk      ),
+        // From IF
+        .inst_in        (ifetch_inst  ),
+        .inst_in_valid  (ifetch_valid || resume_ifetch),
+        .pc_in          (if_pc_r      ),
+        // From ID
+        .pop_valid      (id_ifetch_valid),
+        .pred_error     (pred_error   ),
+        // To ID
+        .inst_out       (ififo_inst_out),
+        .inst_out_valid (ififo_valid  ),
+        .pc_out         (ififo_pc_out ),
+        .full           (ififo_full   )
+    );
+
 
     ID_stage ID (
         .cpu_rstn       (cpu_rstn     ),
@@ -160,16 +190,21 @@ module myCPU (
         .fd_rD1         (fd_rD1       ),
         .fd_rD2_sel     (fd_rD2_sel   ),
         .fd_rD2         (fd_rD2       ),
+        // From IFIFO
+        .ififo_valid    (ififo_valid  ),
+        .ififo_inst    (ififo_inst_out),
+        .ififo_pc       (ififo_pc_out ),
         // From IF and WB
-        .if_valid       (if_valid     ),
-        .if_pc          (if_pc        ),
-        .if_npc         (if_npc       ),
+        .if_npc         (),
         .wb_rf_we       (wb_rf_we     ),
         .wb_wR          (wb_wR        ),
         .wb_wd          (wb_wd        ),
+        .ex_is_ld_st    (ex_is_ld_st  ),
+        // To IFIFO
+        .id_ifetch_valid(id_ifetch_valid),
         // To IF
-        .id_is_ld_st    (id_is_ld_st  ),
-        .id_is_mul_div  (id_is_mul_div),
+        .id_is_ld_st    (),
+        .id_is_mul_div  (),
         // To EX
         .id_valid       (id_valid     ),
         .id_pc          (id_pc        ),
@@ -190,10 +225,7 @@ module myCPU (
         .id_rR1         (id_rR1       ),
         .id_rR1_re      (id_rR1_re    ),
         .id_rR2         (id_rR2       ),
-        .id_rR2_re      (id_rR2_re    ),
-        // Instruction Fetch Interface
-        .ifetch_valid   (ifetch_valid ),
-        .ifetch_inst    (ifetch_inst  )
+        .id_rR2_re      (id_rR2_re    )
     );
 
     EX_stage EX (

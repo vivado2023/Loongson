@@ -30,28 +30,51 @@ module async_fifo #(
     reg [ADDR_WIDTH:0] wr_ptr_gray_rdclk1, wr_ptr_gray_rdclk2;
     reg [ADDR_WIDTH:0] rd_ptr_gray_wrclk1, rd_ptr_gray_wrclk2;
 
-    wire [ADDR_WIDTH:0] wr_ptr_bin_next  = wr_ptr_bin + (wr_en && !full);;
-    wire [ADDR_WIDTH:0] wr_ptr_gray_next = (wr_ptr_bin_next >> 1) ^ wr_ptr_bin_next;
+    // wire [ADDR_WIDTH:0] wr_ptr_bin_next  = wr_ptr_bin + (wr_en && !full);
+    // wire [ADDR_WIDTH:0] wr_ptr_gray_next = (wr_ptr_bin_next >> 1) ^ wr_ptr_bin_next;
+    wire [ADDR_WIDTH:0] wr_ptr_bin_inc;
+    wire [ADDR_WIDTH:0] wr_ptr_gray_inc;
+
+    assign wr_ptr_bin_inc  = wr_ptr_bin + 1'b1;
+    assign wr_ptr_gray_inc = (wr_ptr_bin_inc >> 1) ^ wr_ptr_bin_inc;
+
+    assign full = (
+        wr_ptr_gray_inc ==
+        {
+            ~rd_ptr_gray_wrclk2[ADDR_WIDTH:ADDR_WIDTH-1],
+            rd_ptr_gray_wrclk2[ADDR_WIDTH-2:0]
+        }
+    );
 
     // ==================== 写时钟域逻辑 ====================
-    integer i;
+    // integer i;
+    // always @(posedge wr_clk or negedge rstn) begin
+    //     if (!rstn) begin
+    //         wr_ptr_bin  <= 0;
+    //         wr_ptr_gray <= 0;
+    //         for (i = 0; i < FIFO_DEPTH; i = i + 1)
+    //             mem[i] <= {DATA_WIDTH{1'b0}};
+    //     end else begin
+    //         wr_ptr_bin  <= wr_ptr_bin_next;
+    //         wr_ptr_gray <= wr_ptr_gray_next;
+    //         if (wr_en && !full) begin
+    //             mem[wr_ptr_bin[ADDR_WIDTH-1:0]] <= din;
+    //         end
+    //     end
+    // end
     always @(posedge wr_clk or negedge rstn) begin
         if (!rstn) begin
             wr_ptr_bin  <= 0;
             wr_ptr_gray <= 0;
-            for (i = 0; i < FIFO_DEPTH; i = i + 1)
-                mem[i] <= {DATA_WIDTH{1'b0}};
-        end else begin
-            wr_ptr_bin  <= wr_ptr_bin_next;
-            wr_ptr_gray <= wr_ptr_gray_next;
-            if (wr_en && !full) begin
-                mem[wr_ptr_bin[ADDR_WIDTH-1:0]] <= din;
-            end
+        end else if (wr_en && !full) begin
+            mem[wr_ptr_bin[ADDR_WIDTH-1:0]] <= din;
+            wr_ptr_bin  <= wr_ptr_bin_inc;
+            wr_ptr_gray <= wr_ptr_gray_inc;
         end
     end
 
     // 当 wr_en 有效且即将变满时，full 立即变高，阻止 wr_ptr_bin_next 继续增长
-    assign full = (wr_ptr_gray_next == {~rd_ptr_gray_wrclk2[ADDR_WIDTH:ADDR_WIDTH-1], rd_ptr_gray_wrclk2[ADDR_WIDTH-2:0]});
+    // assign full = (wr_ptr_gray_next == {~rd_ptr_gray_wrclk2[ADDR_WIDTH:ADDR_WIDTH-1], rd_ptr_gray_wrclk2[ADDR_WIDTH-2:0]});
 
     // ==================== 读时钟域逻辑 ====================
     always @(posedge rd_clk or negedge rstn)

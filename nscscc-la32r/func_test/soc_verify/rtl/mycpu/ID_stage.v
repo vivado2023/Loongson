@@ -12,13 +12,18 @@ module ID_stage (
     input  wire [31:0]  fd_rD1       ,      // 前递到ID阶段的源操作数1
     input  wire         fd_rD2_sel   ,      // 源操作数2选择信号（选择前递数据或源寄存器1的值）
     input  wire [31:0]  fd_rD2       ,      // 前递到ID阶段的源操作数2
+    // From IFIFO
+    input  wire         ififo_valid  ,      // IF阶段有效信号
+    input  wire [31:0]  ififo_inst   ,      // IF阶段PC值
+    input  wire [31:0]  ififo_pc     ,      // IF阶段PC值
     // From IF and WB
-    input  wire         if_valid     ,      // IF阶段有效信号
-    input  wire [31:0]  if_pc        ,      // IF阶段PC值
     input  wire [31:0]  if_npc       ,      // IF阶段的下一条指令PC值
     input  wire         wb_rf_we     ,      // WB阶段的寄存器写使能
     input  wire [ 4:0]  wb_wR        ,      // WB阶段的目的寄存器
     input  wire [31:0]  wb_wd        ,      // WB阶段的写回数据
+    input  wire         ex_is_ld_st  ,
+    // To IFIFO
+    output wire         id_ifetch_valid,      // ID阶段取值有效信号（用于控制IFIFO是否可以弹出下一条指令）
     // To IF
     output wire         id_is_ld_st  ,      // ID阶段是否是Load/Store指令
     output wire         id_is_mul_div,      // ID阶段是否是乘除指令
@@ -42,74 +47,71 @@ module ID_stage (
     output wire [ 4:0]  id_rR1       ,      // 从指令码中解析出源寄存器1的编号/地址
     output wire         id_rR1_re    ,      // ID阶段的源寄存器1读标志信号（有效时表示指令需要从源寄存器1读取操作数）
     output wire [ 4:0]  id_rR2       ,      // 从指令码中解析出源寄存器2的编号/地址
-    output wire         id_rR2_re    ,      // ID阶段的源寄存器2读标志信号（有效时表示指令需要从源寄存器2读取操作数）
-    // Instruction Fetch Interface
-    input  wire         ifetch_valid ,      // 指令机器码有效信号
-    input  wire [31:0]  ifetch_inst         // 指令机器码
+    output wire         id_rR2_re          // ID阶段的源寄存器2读标志信号（有效时表示指令需要从源寄存器2读取操作数）
 );
 
     IF_ID u_IF_ID (
-        .cpu_clk    (cpu_clk   ),
-        .cpu_rstn   (cpu_rstn  ),
+        .cpu_clk    (cpu_clk    ),
+        .cpu_rstn   (cpu_rstn   ),
         .suspend    (pl_suspend),
-
-        .valid_in   (if_valid  ),
-        .pc_in      (if_pc     ),
-        .pc_out     (id_pc     )
+        .valid_in   (id_ifetch_valid),
+        .pc_in      (ififo_pc   ),
+        .valid_out  (id_valid   ),
+        .pc_out     (id_pc      )
     );
-//id阶段有效的条件：指令机器码有效且没有分支预测错误
-    assign id_valid = ifetch_valid & !pred_error;
+
+    assign id_ifetch_valid = !pred_error && !pl_suspend && !id_is_ld_st && !id_is_mul_div && !ex_is_ld_st && ififo_valid;
 
 /************************************************************/
 //指令解码
 /************************************************************/
 /*确定指令类型*/
-    wire ADD_W     = (ifetch_inst[31:15] == 17'h00020);
-    wire SUB_W     = (ifetch_inst[31:15] == 17'h00022);
-    wire AND       = (ifetch_inst[31:15] == 17'h00029);
-    wire OR        = (ifetch_inst[31:15] == 17'h0002A);
-    wire XOR       = (ifetch_inst[31:15] == 17'h0002B);
-    wire NOR       = (ifetch_inst[31:15] == 17'h00028);
-    wire SLL_W     = (ifetch_inst[31:15] == 17'h0002E);
-    wire SRL_W     = (ifetch_inst[31:15] == 17'h0002F);
-    wire SRA_W     = (ifetch_inst[31:15] == 17'h00030);
-    wire SLT_W     = (ifetch_inst[31:15] == 17'h00024);
-    wire SLTU_W    = (ifetch_inst[31:15] == 17'h00025);
-    wire MUL_W     = (ifetch_inst[31:15] == 17'h00038);
-    wire MULH_W    = (ifetch_inst[31:15] == 17'h00039);
-    wire MULH_WU   = (ifetch_inst[31:15] == 17'h0003A);
-    wire DIV_W     = (ifetch_inst[31:15] == 17'h00040);
-    wire DIV_WU    = (ifetch_inst[31:15] == 17'h00042);
-    wire MOD_W     = (ifetch_inst[31:15] == 17'h00041);
-    wire MOD_WU    = (ifetch_inst[31:15] == 17'h00043);
-    wire SLLI_W    = (ifetch_inst[31:15] == 17'h00081);
-    wire SRLI_W    = (ifetch_inst[31:15] == 17'h00089);
-    wire SRAI_W    = (ifetch_inst[31:15] == 17'h00091);
-    wire ADDI_W    = (ifetch_inst[31:22] == 10'h00A  );
-    wire ANDI      = (ifetch_inst[31:22] == 10'h00D  );
-    wire ORI       = (ifetch_inst[31:22] == 10'h00E  );
-    wire XORI      = (ifetch_inst[31:22] == 10'h00F  );
-    wire SLTI      = (ifetch_inst[31:22] == 10'h008  );
-    wire SLTUI     = (ifetch_inst[31:22] == 10'h009  );
-    wire LD_B      = (ifetch_inst[31:22] == 10'h0A0  );
-    wire LD_BU     = (ifetch_inst[31:22] == 10'h0A8  );
-    wire LD_H      = (ifetch_inst[31:22] == 10'h0A1  );
-    wire LD_HU     = (ifetch_inst[31:22] == 10'h0A9  );
-    wire LD_W      = (ifetch_inst[31:22] == 10'h0A2  );
-    wire ST_B      = (ifetch_inst[31:22] == 10'h0A4  );
-    wire ST_H      = (ifetch_inst[31:22] == 10'h0A5  );
-    wire ST_W      = (ifetch_inst[31:22] == 10'h0A6  );
-    wire LU12I_W   = (ifetch_inst[31:25] == 7'h0A    );
-    wire PCADDU12I = (ifetch_inst[31:25] == 7'h0E    );
-    wire BEQ       = (ifetch_inst[31:26] == 6'h16    );
-    wire BNE       = (ifetch_inst[31:26] == 6'h17    );
-    wire BLT       = (ifetch_inst[31:26] == 6'h18    );
-    wire BLTU      = (ifetch_inst[31:26] == 6'h1A    );
-    wire BGE       = (ifetch_inst[31:26] == 6'h19    );
-    wire BGEU      = (ifetch_inst[31:26] == 6'h1B    );
-    wire JIRL      = (ifetch_inst[31:26] == 6'h13    );
-    wire B         = (ifetch_inst[31:26] == 6'h14    );
-    wire BL        = (ifetch_inst[31:26] == 6'h15    );
+    wire ADD_W     = (ififo_inst[31:15] === 17'h00020);
+    wire SUB_W     = (ififo_inst[31:15] === 17'h00022);
+    wire AND       = (ififo_inst[31:15] === 17'h00029);
+    wire OR        = (ififo_inst[31:15] === 17'h0002A);
+    wire XOR       = (ififo_inst[31:15] === 17'h0002B);
+    wire NOR       = (ififo_inst[31:15] === 17'h00028);
+    wire SLL_W     = (ififo_inst[31:15] === 17'h0002E);
+    wire SRL_W     = (ififo_inst[31:15] === 17'h0002F);
+    wire SRA_W     = (ififo_inst[31:15] === 17'h00030);
+    wire SLT_W     = (ififo_inst[31:15] === 17'h00024);
+    wire SLTU_W    = (ififo_inst[31:15] === 17'h00025);
+    wire MUL_W     = (ififo_inst[31:15] === 17'h00038);
+    wire MULH_W    = (ififo_inst[31:15] === 17'h00039);
+    wire MULH_WU   = (ififo_inst[31:15] === 17'h0003A);
+    wire DIV_W     = (ififo_inst[31:15] === 17'h00040);
+    wire DIV_WU    = (ififo_inst[31:15] === 17'h00042);
+    wire MOD_W     = (ififo_inst[31:15] === 17'h00041);
+    wire MOD_WU    = (ififo_inst[31:15] === 17'h00043);
+    wire SLLI_W    = (ififo_inst[31:15] === 17'h00081);
+    wire SRLI_W    = (ififo_inst[31:15] === 17'h00089);
+    wire SRAI_W    = (ififo_inst[31:15] === 17'h00091);
+    wire ADDI_W    = (ififo_inst[31:22] === 10'h00A  );
+    wire ANDI      = (ififo_inst[31:22] === 10'h00D  );
+    wire ORI       = (ififo_inst[31:22] === 10'h00E  );
+    wire XORI      = (ififo_inst[31:22] === 10'h00F  );
+    wire SLTI      = (ififo_inst[31:22] === 10'h008  );
+    wire SLTUI     = (ififo_inst[31:22] === 10'h009  );
+    wire LD_B      = (ififo_inst[31:22] === 10'h0A0  );
+    wire LD_BU     = (ififo_inst[31:22] === 10'h0A8  );
+    wire LD_H      = (ififo_inst[31:22] === 10'h0A1  );
+    wire LD_HU     = (ififo_inst[31:22] === 10'h0A9  );
+    wire LD_W      = (ififo_inst[31:22] === 10'h0A2  );
+    wire ST_B      = (ififo_inst[31:22] === 10'h0A4  );
+    wire ST_H      = (ififo_inst[31:22] === 10'h0A5  );
+    wire ST_W      = (ififo_inst[31:22] === 10'h0A6  );
+    wire LU12I_W   = (ififo_inst[31:25] === 7'h0A    );
+    wire PCADDU12I = (ififo_inst[31:25] === 7'h0E    );
+    wire BEQ       = (ififo_inst[31:26] === 6'h16    );
+    wire BNE       = (ififo_inst[31:26] === 6'h17    );
+    wire BLT       = (ififo_inst[31:26] === 6'h18    );
+    wire BLTU      = (ififo_inst[31:26] === 6'h1A    );
+    wire BGE       = (ififo_inst[31:26] === 6'h19    );
+    wire BGEU      = (ififo_inst[31:26] === 6'h1B    );
+    wire JIRL      = (ififo_inst[31:26] === 6'h13    );
+    wire B         = (ififo_inst[31:26] === 6'h14    );
+    wire BL        = (ififo_inst[31:26] === 6'h15    );
 
     wire is_branch = TYPE_2RI16;
     wire is_jump   = JIRL | B | BL;
@@ -173,7 +175,7 @@ module ID_stage (
 /*确定源操作数相关*/
 wire [31:0] id_rD1, id_rD2;
 //确定源操作数1地址（rj）（只针对通用寄存器）
-    assign id_rR1 = !LU12I_W ? ifetch_inst[9:5] : 5'h0;
+    assign id_rR1 = !LU12I_W ? ififo_inst[9:5] : 5'h0;
 //确定源操作数1读使能：除PCADDU12I指令，都需要从寄存器读取源操作数1
     assign id_rR1_re = !PCADDU12I;
 //确定源操作数1的选择：除PCADDU12I指令源操作数1为PC，其他指令源操作数1为通用寄存器的值
@@ -181,8 +183,8 @@ wire [31:0] id_rD1, id_rD2;
 //确定源操作数1的实际值：如果前递选择信号fd_rD1_sel有效，则使用前递数据fd_rD1，否则使用从寄存器堆读出的数据id_rD1
     assign id_real_rD1 = fd_rD1_sel ? fd_rD1 : id_rD1;
 
-//确定源操作数2地址：如果是store指令，则rR2为rd（ifetch_inst[4:0]），否则rR2为rk（ifetch_inst[14:10]）
-    assign id_rR2 = (STORE | TYPE_2RI16) ? ifetch_inst[4:0] : ifetch_inst[14:10];
+//确定源操作数2地址：如果是store指令，则rR2为rd（ififo_inst[4:0]），否则rR2为rk（ififo_inst[14:10]）
+    assign id_rR2 = (STORE | TYPE_2RI16) ? ififo_inst[4:0] : ififo_inst[14:10];
 //确定源操作数2读使能：TYPE_3R或STORE或TYPE_2RI16指令需要从寄存器读取源操作数2
     assign id_rR2_re = TYPE_3R | STORE | TYPE_2RI16;
 //确定源操作数2的选择：如果是PCADDU12I、LU12I_W、LOAD或STORE或TYPE_2RI5指令，则为扩展立即数，否则为通用寄存器的值
@@ -191,14 +193,14 @@ wire [31:0] id_rD1, id_rD2;
     assign id_real_rD2 = fd_rD2_sel ? fd_rD2 : id_rD2;
 
 /*确定写回通用寄存器数据相关*/
-//确定写回地址：对于写入寄存器堆的指令，除了bl指令，目的寄存器都是rd（ifetch_inst[4:0]）
-    assign id_wR  = !BL ? ifetch_inst[4:0] : 5'h1;
+//确定写回地址：对于写入寄存器堆的指令，除了bl指令，目的寄存器都是rd（ififo_inst[4:0]）
+    assign id_wR  = !BL ? ififo_inst[4:0] : 5'h1;
 //确定写回使能：如果是TYPE_3R、PCADDU12I、LU12I_W、LOAD或TYPE_2RI5指令，则需要写回通用寄存器
     assign id_rf_we = TYPE_3R | TYPE_2RI5 | TYPE_2RI12 | PCADDU12I | LU12I_W | LOAD | JIRL | BL;
 
 /*确定主存相关指令*/
 //确定是否是Load/Store指令
-    assign id_is_ld_st = id_valid & (LOAD | STORE);
+    assign id_is_ld_st = id_valid && (LOAD | STORE);
 //控制主存读回数据的扩展方式（针对load指令）
     assign id_ram_ext_op = {3{LD_H}} & `RAM_EXT_H |
                            {3{LD_HU}}& `RAM_EXT_HU|
@@ -226,7 +228,7 @@ wire [31:0] id_rD1, id_rD2;
 
     assign id_is_br_jmp = TYPE_2RI16 | JIRL | B | BL;
 
-    assign id_is_mul_div = id_valid & (MUL_W | MULH_W | MULH_WU | DIV_W | DIV_WU | MOD_W | MOD_WU);
+    assign id_is_mul_div =  id_valid && (MUL_W | MULH_W | MULH_WU | DIV_W | DIV_WU | MOD_W | MOD_WU);
 
 
 /************************************************************/
@@ -248,15 +250,15 @@ wire [31:0] id_rD1, id_rD2;
 //立即数扩展
 /************************************************************/
     always @(*) begin
-        if(LOAD | STORE)              id_ext = (ifetch_inst[21] ? {20'hfffff,ifetch_inst[21:10]} : {20'h00000,ifetch_inst[21:10]});
+        if(LOAD | STORE)              id_ext = (ififo_inst[21] ? {20'hfffff,ififo_inst[21:10]} : {20'h00000,ififo_inst[21:10]});
         else if(TYPE_2RI12) begin
-            if(ADDI_W | SLTI | SLTUI) id_ext = (ifetch_inst[21] ? {20'hfffff,ifetch_inst[21:10]} : {20'h00000,ifetch_inst[21:10]});
-            else                      id_ext = {20'h00000,ifetch_inst[21:10]};
+            if(ADDI_W | SLTI | SLTUI) id_ext = (ififo_inst[21] ? {20'hfffff,ififo_inst[21:10]} : {20'h00000,ififo_inst[21:10]});
+            else                      id_ext = {20'h00000,ififo_inst[21:10]};
         end
-        else if(PCADDU12I | LU12I_W)  id_ext = {ifetch_inst[24:5],12'h000};
-        else if(TYPE_2RI16 | JIRL)    id_ext = (ifetch_inst[25] ? {14'h3fff,ifetch_inst[25:10],2'b0} : {14'h0000,ifetch_inst[25:10],2'b0});
-        else if(B | BL)               id_ext = (ifetch_inst[9] ? {4'hf,ifetch_inst[9:0],ifetch_inst[25:10],2'b0} : {4'h0,ifetch_inst[9:0],ifetch_inst[25:10],2'b0});
-        else                          id_ext = {27'h0000000,ifetch_inst[14:10]};
+        else if(PCADDU12I | LU12I_W)  id_ext = {ififo_inst[24:5],12'h000};
+        else if(TYPE_2RI16 | JIRL)    id_ext = (ififo_inst[25] ? {14'h3fff,ififo_inst[25:10],2'b0} : {14'h0000,ififo_inst[25:10],2'b0});
+        else if(B | BL)               id_ext = (ififo_inst[9] ? {4'hf,ififo_inst[9:0],ififo_inst[25:10],2'b0} : {4'h0,ififo_inst[9:0],ififo_inst[25:10],2'b0});
+        else                          id_ext = {27'h0000000,ififo_inst[14:10]};
 
     end
 

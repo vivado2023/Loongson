@@ -21,6 +21,7 @@ module IF_stage (
     // To ID
     output wire         if_valid     ,      // IF阶段有效信号
     output wire [31:0]  if_pc        ,      // IF阶段PC值
+    output reg  [31:0]  if_pc_r      ,      
     output wire [31:0]  if_npc       ,      // 实际的下一条指令的地址
     // Instruction Fetch Interface
     output wire         ifetch_rreq  ,      // 取指请求信号
@@ -32,15 +33,20 @@ module IF_stage (
     wire first_req = !rstn_r & cpu_rstn;    // posedge of cpu_rstn
     always @(posedge cpu_clk) rstn_r <= cpu_rstn;
 
-    reg pred_error_r;
+    // reg pred_error_r;
+    // always @(posedge cpu_clk or negedge cpu_rstn) begin
+    //     if(!cpu_rstn)  pred_error_r <= 1'b0;
+    //     else if(!pl_suspend) pred_error_r <= pred_error;
+    //     else if(resume_ifetch) pred_error_r <= pred_error;
+    // end
+
     always @(posedge cpu_clk or negedge cpu_rstn) begin
-        if(!cpu_rstn)  pred_error_r <= 1'b0;
-        else if(!pl_suspend) pred_error_r <= pred_error;
-        else if(resume_ifetch) pred_error_r <= pred_error;
+        if (!cpu_rstn)      if_pc_r <= `PC_INIT_VAL;
+        else if (ifetch_rreq) if_pc_r <= if_pc;
     end
 
     wire [31:0] pc_reg;     // PC寄存器的值
-    assign      if_pc = (resume_ifetch && pred_error_r || pred_error) ? if_npc : pc_reg;
+    assign      if_pc = (pred_error) ? if_npc : pc_reg;
     
     assign ifetch_rreq = !pause_ifetch & (first_req    |    // 复位后首次取指
                                           ifetch_valid |    // 上一条已取回, 同时立即取下一条
@@ -62,8 +68,8 @@ module IF_stage (
     NPC u_NPC (
         .cpu_clk    (cpu_clk    ),
         .cpu_rstn   (cpu_rstn   ),
-        .id_valid   (id_valid   ),
-        .ex_valid   (ex_valid   ),
+        .id_valid   (   ),
+        .ex_valid   (   ),
         .npc_op     (ex_npc_op  ),
         .ex_pc      (ex_pc      ),
         .rj         (ex_rD1     ),
