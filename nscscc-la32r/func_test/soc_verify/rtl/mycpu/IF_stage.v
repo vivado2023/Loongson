@@ -3,16 +3,13 @@
 module IF_stage (
     input  wire         cpu_rstn     ,
     input  wire         cpu_clk      ,
-    // 流水线控制信号
-    input  wire         pause_ifetch ,      // 暂停取指信号
-    input  wire         resume_ifetch,      // 恢复取指信号
-    input  wire         pl_suspend   ,      // 流水线暂停
+    // 控制取指的信号
+    input  wire         pause_ifetch ,      // IFIFO满，暂停取指信号
+    input  wire         resume_ifetch,      // IFIFO恢复，恢复取指信号
     // 来自分支预测器的信号
     input  wire         pred_error   ,      // 分支预测错误的标志位
     input  wire [31:0]  pred_target  ,      // 预测的下一条指令的地址
     // 来自其他阶段的信号
-    input  wire         id_valid     ,      // ID阶段的有效信号
-    input  wire         ex_valid     ,      // EX阶段的有效信号
     input  wire [ 1:0]  ex_npc_op    ,      // EX阶段的npc_op，用于控制下一条指令PC值的生成
     input  wire [31:0]  ex_pc        ,      // EX阶段的PC值
     input  wire [31:0]  ex_rD1       ,      // EX阶段的源寄存器1的值
@@ -21,7 +18,7 @@ module IF_stage (
     // To ID
     output wire         if_valid     ,      // IF阶段有效信号
     output wire [31:0]  if_pc        ,      // IF阶段PC值
-    output reg  [31:0]  if_pc_r      ,      
+    output reg  [31:0]  if_pc_r      ,      // IF阶段的PC值，延时一个周期，保证和取到的指令一起给到IFIFO
     output wire [31:0]  if_npc       ,      // 实际的下一条指令的地址
     // Instruction Fetch Interface
     output wire         ifetch_rreq  ,      // 取指请求信号
@@ -33,12 +30,6 @@ module IF_stage (
     wire first_req = !rstn_r & cpu_rstn;    // posedge of cpu_rstn
     always @(posedge cpu_clk) rstn_r <= cpu_rstn;
 
-    // reg pred_error_r;
-    // always @(posedge cpu_clk or negedge cpu_rstn) begin
-    //     if(!cpu_rstn)  pred_error_r <= 1'b0;
-    //     else if(!pl_suspend) pred_error_r <= pred_error;
-    //     else if(resume_ifetch) pred_error_r <= pred_error;
-    // end
 
     always @(posedge cpu_clk or negedge cpu_rstn) begin
         if (!cpu_rstn)      if_pc_r <= `PC_INIT_VAL;
@@ -58,8 +49,6 @@ module IF_stage (
     PC u_PC (
         .cpu_clk    (cpu_clk    ),
         .cpu_rstn   (cpu_rstn   ),
-        .suspend    (pl_suspend ),
-
         .if_valid   (if_valid   ),
         .din        (pred_target),
         .pc         (pc_reg     )
@@ -68,8 +57,6 @@ module IF_stage (
     NPC u_NPC (
         .cpu_clk    (cpu_clk    ),
         .cpu_rstn   (cpu_rstn   ),
-        .id_valid   (   ),
-        .ex_valid   (   ),
         .npc_op     (ex_npc_op  ),
         .ex_pc      (ex_pc      ),
         .rj         (ex_rD1     ),

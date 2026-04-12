@@ -10,9 +10,6 @@ module BPU (
     input  wire         cpu_clk    ,
     input  wire         cpu_rstn   ,
     input  wire [31:0]  if_pc      ,    // IF阶段的PC值
-    input  wire         if_valid   ,    // IF阶段的有效信号
-    input  wire         id_valid   ,    // ID阶段的有效信号
-    input  wire         pl_suspend ,    // 流水线暂停信号
     // predict branch direction and target
     output wire [31:0]  pred_target,    // 预测的下一条指令地址
     output wire         pred_error ,    // 预测是否错误

@@ -27,9 +27,7 @@ module myCPU (
     wire        pred_error   ;      // 分支预测失败标志位信号
     wire [31:0] pred_target  ;      // 分支预测目标地址
     wire        ex_suspend;         // EX阶段发出的流水线暂停信号（针对乘除指令）
-    wire        mul_div_done ;      // 乘除运算完成信号
     wire        ldst_suspend ;      // 执行访存指令时的流水线暂停信号
-    wire        ldst_done    ;      // 访存指令在MEM阶段访存完毕
     wire        ldst_unalign ;      // 访存指令的访存地址是否满足对齐条件
     wire [31:0] fd_rD1       ;      // 前递到ID阶段的源操作数1
     wire [31:0] fd_rD2       ;      // 前递到ID阶段的源操作数2
@@ -39,7 +37,16 @@ module myCPU (
     // IF Stage
     wire        if_valid     ;      // IF阶段有效信号（有效表示当前有指令正处于IF阶段, 或IF阶段正在取指）
     wire [31:0] if_pc        ;      // IF阶段的PC值, 或取指的指令地址
+    wire [31:0] if_pc_r;            // IF阶段的PC值，延时一个周期，保证和取到的指令一起给到IFIFO
     wire [31:0] if_npc       ;      // IF阶段的下一条指令PC值
+
+    // IFIFO Stage
+    wire [31:0] ififo_inst_out;     // IFIFO输出的指令
+    wire        ififo_valid;        // IFIFO输出的指令有效信号
+    wire        ififo_full;         // IFIFO满标志信号
+    wire        id_ifetch_valid;    // ID阶段发出的取指有效信号（表示ID阶段已准备好接收IFIFO输出的指令，可以让IFIFO输出下一条指令）
+    wire [31:0] ififo_pc_out;       // IFIFO输出的指令对应的PC值
+
     // ID stage
     wire        id_valid     ;      // ID阶段有效信号（有效表示当前有指令正处于ID阶段）
     wire [31:0] id_pc        ;      // ID阶段的PC值
@@ -98,23 +105,21 @@ module myCPU (
     wire [ 4:0] wb_wR        ;      // WB阶段的目的寄存器
     wire [31:0] wb_wd        ;      // WB阶段的写回数据
 
+
+    wire pl_suspend = ldst_suspend | ex_suspend;
+
     reg ififo_full_r;
     always @(posedge cpu_clk) begin
         ififo_full_r <= ififo_full;
     end
 
-    wire        pl_suspend    = ldst_suspend | ex_suspend;       // 流水线暂停信号
-    // 出现多周期指令(访存、乘除法)暂停取指, 多周期操作结束后继续取指
-    wire        pause_ifetch  = ififo_full;
-    wire        resume_ifetch = ififo_full_r && !ififo_full && ifetch_inst != 32'h0;          // 恢复取指
+    wire pause_ifetch  = ififo_full;
+    wire resume_ifetch = ififo_full_r && !ififo_full && ifetch_inst != 32'h0;
     
     BPU u_BPU (
         .cpu_clk        (cpu_clk      ),
         .cpu_rstn       (cpu_rstn     ),
         .if_pc          (if_pc        ),
-        .if_valid       (if_valid     ),
-        .id_valid       (id_valid     ),
-        .pl_suspend     (1'b0         ),
         // predicted branch dir. and target
         .pred_target    (pred_target  ),
         .pred_error     (pred_error   ),
@@ -126,26 +131,23 @@ module myCPU (
         .real_target    (if_npc       )
     );
 
-wire [31:0] if_pc_r;
+
     IF_stage IF (
         .cpu_rstn       (cpu_rstn     ),
         .cpu_clk        (cpu_clk      ),
         // pipeline control
         .pause_ifetch   (pause_ifetch ),
         .resume_ifetch  (resume_ifetch),
-        .pl_suspend     (1'b0         ),
         // From BPU
         .pred_error     (pred_error   ),
         .pred_target    (pred_target  ),
         // From other stages
-        .id_valid       (id_valid     ),
-        .ex_valid       (ex_valid     ),
         .ex_npc_op      (ex_npc_op    ),
         .ex_pc          (ex_pc        ),
         .ex_rD1         (ex_rD1       ),
         .ex_ext         (ex_ext       ),
         .ex_alu_f       (ex_alu_f     ),
-        // To ID
+        // To IFIFO
         .if_valid       (if_valid     ),
         .if_pc          (if_pc        ),
         .if_pc_r        (if_pc_r      ),
@@ -156,11 +158,6 @@ wire [31:0] if_pc_r;
         .ifetch_valid   (ifetch_valid )
     );
 
-wire [31:0] ififo_inst_out;
-wire        ififo_valid;
-wire        ififo_full;
-wire        id_ifetch_valid;
-wire [31:0] ififo_pc_out;
 
     Ififo u_Ififo (
         .cpu_rstn       (cpu_rstn     ),
@@ -194,17 +191,13 @@ wire [31:0] ififo_pc_out;
         .ififo_valid    (ififo_valid  ),
         .ififo_inst    (ififo_inst_out),
         .ififo_pc       (ififo_pc_out ),
-        // From IF and WB
-        .if_npc         (),
+        // From EX and WB
         .wb_rf_we       (wb_rf_we     ),
         .wb_wR          (wb_wR        ),
         .wb_wd          (wb_wd        ),
         .ex_is_ld_st    (ex_is_ld_st  ),
         // To IFIFO
         .id_ifetch_valid(id_ifetch_valid),
-        // To IF
-        .id_is_ld_st    (),
-        .id_is_mul_div  (),
         // To EX
         .id_valid       (id_valid     ),
         .id_pc          (id_pc        ),
@@ -233,8 +226,7 @@ wire [31:0] ififo_pc_out;
         .cpu_clk        (cpu_clk      ),
         // pipeline control
         .pl_suspend     (pl_suspend   ),
-        .ex_suspend     (ex_suspend)   ,
-        .mul_div_done   (mul_div_done) ,
+        .ex_suspend     (ex_suspend   ),
         .ldst_unalign   (ldst_unalign ),
         // From ID
         .id_valid       (id_valid     ),
@@ -255,9 +247,10 @@ wire [31:0] ififo_pc_out;
         // To IF
         .ex_npc_op      (ex_npc_op    ),
         .ex_alu_f       (ex_alu_f     ),
-        .ex_is_ld_st    (ex_is_ld_st  ),
         .ex_is_br_jmp   (ex_is_br_jmp ),
         .ex_br_jmp_f    (ex_br_jmp_f  ),
+        // To ID
+        .ex_is_ld_st    (ex_is_ld_st  ),
         // To MEM
         .ex_valid       (ex_valid     ),
         .ex_wR          (ex_wR        ),
@@ -281,7 +274,6 @@ wire [31:0] ififo_pc_out;
         // pipeline control
         .pl_suspend     (pl_suspend   ),
         .ldst_suspend   (ldst_suspend ),
-        .ldst_done      (ldst_done    ),
         .ldst_unalign   (ldst_unalign ),
         // From EX
         .ex_valid       (ex_valid     ),

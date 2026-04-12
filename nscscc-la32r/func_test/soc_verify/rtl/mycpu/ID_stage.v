@@ -16,17 +16,13 @@ module ID_stage (
     input  wire         ififo_valid  ,      // IF阶段有效信号
     input  wire [31:0]  ififo_inst   ,      // IF阶段PC值
     input  wire [31:0]  ififo_pc     ,      // IF阶段PC值
-    // From IF and WB
-    input  wire [31:0]  if_npc       ,      // IF阶段的下一条指令PC值
+    // From EX and WB
     input  wire         wb_rf_we     ,      // WB阶段的寄存器写使能
     input  wire [ 4:0]  wb_wR        ,      // WB阶段的目的寄存器
     input  wire [31:0]  wb_wd        ,      // WB阶段的写回数据
-    input  wire         ex_is_ld_st  ,
+    input  wire         ex_is_ld_st  ,      // EX阶段是否是Load/Store指令
     // To IFIFO
     output wire         id_ifetch_valid,      // ID阶段取值有效信号（用于控制IFIFO是否可以弹出下一条指令）
-    // To IF
-    output wire         id_is_ld_st  ,      // ID阶段是否是Load/Store指令
-    output wire         id_is_mul_div,      // ID阶段是否是乘除指令
     // To EX
     output wire         id_valid     ,      // ID阶段有效信号
     output wire [31:0]  id_pc        ,      // ID阶段PC值
@@ -59,6 +55,9 @@ module ID_stage (
         .valid_out  (id_valid   ),
         .pc_out     (id_pc      )
     );
+
+    wire id_is_ld_st  ;  // ID阶段是否是Load/Store指令
+    wire id_is_mul_div;  // ID阶段是否是乘除指令
 
     assign id_ifetch_valid = !pred_error && !pl_suspend && !id_is_ld_st && !id_is_mul_div && !ex_is_ld_st && ififo_valid;
 

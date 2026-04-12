@@ -8,7 +8,6 @@ module EX_stage (
     // pipeline control
     input  wire         pl_suspend   ,      // 流水线暂停信号
     output wire         ex_suspend   ,      // ex阶段发出的流水线暂停信号（针对乘除指令）
-    output wire         mul_div_done ,      // 乘除运算完成信号
     output reg          ldst_unalign ,      // 访存地址是否不满足对齐条件
     // From ID
     input  wire         id_valid     ,      // ID阶段有效信号
@@ -50,6 +49,7 @@ module EX_stage (
 );
 
     wire [ 4:0] ex_alu_op;
+    wire        mul_div_done;
     assign      ex_suspend = ((ex_alu_op == `ALU_MUL) || (ex_alu_op == `ALU_MULH) || (ex_alu_op == `ALU_MULH_U) || 
                               (ex_alu_op == `ALU_DIV) || (ex_alu_op == `ALU_DIV_U) || (ex_alu_op == `ALU_MOD) || (ex_alu_op == `ALU_MOD_U)) 
                               && !mul_div_done; 

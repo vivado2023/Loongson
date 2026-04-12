@@ -8,7 +8,6 @@ module MEM_stage (
     // pipeline control
     input  wire         pl_suspend   ,      // 流水线暂停信号
     output wire         ldst_suspend ,      // 访存引起的流水线暂停信号
-    output wire         ldst_done    ,      // 访存完成的标志位信号
     input  wire         ldst_unalign ,      // 访存地址是否满足对齐条件
     // From EX
     input  wire         ex_valid     ,      // EX阶段有效信号
@@ -45,6 +44,7 @@ module MEM_stage (
     wire [31:0] mem_rD2;
     wire [ 2:0] mem_ram_ext_op;
     wire [ 3:0] mem_ram_we;
+    wire        ldst_done;
 
     reg    mem_is_ld_st;    // MEM Stage is load or store
     assign ldst_done    = mem_is_ld_st & (daccess_valid | daccess_wresp);

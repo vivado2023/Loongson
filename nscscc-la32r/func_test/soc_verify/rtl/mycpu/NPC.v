@@ -5,8 +5,6 @@
 module NPC (
     input  wire         cpu_clk ,
     input  wire         cpu_rstn,
-    input  wire         id_valid,
-    input  wire         ex_valid,
     input  wire [ 1:0]  npc_op  , //决定采用什么方式计算下一条指令的地址，顺序、B、J等
     input  wire [31:0]  ex_pc   ,
     input  wire [31:0]  rj      , //jirl指令需要rj(ifetch_inst[9:5])+imm
