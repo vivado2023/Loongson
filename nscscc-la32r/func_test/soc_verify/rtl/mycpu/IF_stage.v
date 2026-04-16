@@ -10,11 +10,11 @@ module IF_stage (
     input  wire         pred_error   ,      // 分支预测错误的标志位
     input  wire [31:0]  pred_target  ,      // 预测的下一条指令的地址
     // 来自其他阶段的信号
-    input  wire [ 1:0]  ex_npc_op    ,      // EX阶段的npc_op，用于控制下一条指令PC值的生成
-    input  wire [31:0]  ex_pc        ,      // EX阶段的PC值
-    input  wire [31:0]  ex_rD1       ,      // EX阶段的源寄存器1的值
-    input  wire [31:0]  ex_ext       ,      // EX阶段的扩展后的立即数
-    input  wire         ex_alu_f     ,      // EX阶段的标志位
+    input  wire [ 1:0]  mem_npc_op    ,      // MEM阶段的npc_op，用于控制下一条指令PC值的生成
+    input  wire [31:0]  mem_pc        ,      // MEM阶段的PC值
+    input  wire [31:0]  mem_rD1       ,      // MEM阶段的源寄存器1的值
+    input  wire [31:0]  mem_ext       ,      // MEM阶段的扩展后的立即数
+    input  wire         mem_alu_f     ,      // MEM阶段的标志位
     // To ID
     output wire         if_valid     ,      // IF阶段有效信号
     output wire [31:0]  if_pc        ,      // IF阶段PC值
@@ -57,11 +57,11 @@ module IF_stage (
     NPC u_NPC (
         .cpu_clk    (cpu_clk    ),
         .cpu_rstn   (cpu_rstn   ),
-        .npc_op     (ex_npc_op  ),
-        .ex_pc      (ex_pc      ),
-        .rj         (ex_rD1     ),
-        .offset     (ex_ext     ),
-        .br         (ex_alu_f   ), 
+        .npc_op     (mem_npc_op  ),
+        .mem_pc     (mem_pc      ),
+        .rj         (mem_rD1     ),
+        .offset     (mem_ext     ),
+        .br         (mem_alu_f   ), 
         .npc        (if_npc     )
     );
 

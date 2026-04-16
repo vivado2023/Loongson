@@ -7,6 +7,7 @@ module EX_stage (
     input  wire         cpu_clk      ,
     // pipeline control
     input  wire         pl_suspend   ,      // 流水线暂停信号
+    input  wire         pred_error   ,      // 分支预测错误信号
     output wire         ex_suspend   ,      // ex阶段发出的流水线暂停信号（针对乘除指令）
     output reg          ldst_unalign ,      // 访存地址是否不满足对齐条件
     // From ID
@@ -26,11 +27,7 @@ module EX_stage (
     input  wire [ 2:0]  id_ram_ext_op,      // ID阶段的读主存数据扩展op，用于控制主存读回数据的扩展方式（针对load指令）
     input  wire         id_is_br_jmp ,      // ID阶段是否是条件分支或直接跳转指令
     // To IF
-    output wire [ 1:0]  ex_npc_op    ,      // EX阶段的npc_op，用于控制下一条指令PC值的生成
-    output wire         ex_alu_f     ,      // EX阶段的标志位
     output wire         ex_is_ld_st  ,      // EX阶段是否是Load/Store指令
-    output wire         ex_is_br_jmp ,      // EX阶段是否是条件分支或直接跳转指令
-    output wire         ex_br_jmp_f  ,      // EX阶段分支跳转指令实际是否会发生跳转
     // To MEM
     output wire         ex_valid     ,      // EX阶段有效信号
     output wire [31:0]  ex_pc        ,      // EX阶段PC值
@@ -43,6 +40,10 @@ module EX_stage (
     output wire [ 1:0]  ex_wd_sel    ,      // EX阶段的写回数据选择（选择ALU执行结果写回，或选择访存数据写回，etc.）
     output wire [ 3:0]  ex_ram_we    ,      // EX阶段的主存写使能信号（针对store指令）
     output wire [ 2:0]  ex_ram_ext_op,      // EX阶段的读主存数据扩展op，用于控制主存读回数据的扩展方式（针对load指令）
+    output wire         ex_is_br_jmp ,      // EX阶段是否是条件分支或直接跳转指令
+    output wire         ex_br_jmp_f  ,      // EX阶段分支跳转指令实际是否会发生跳转
+    output wire [ 1:0]  ex_npc_op    ,      // EX阶段的npc_op，用于控制下一条指令PC值的生成
+    output wire         ex_alu_f     ,      // EX阶段的标志位
     // Data Forward
     output reg  [31:0]  ex_wd        ,      // EX阶段的待写回数据
     output wire         ex_sel_ram          // EX阶段是否是访存指令 (特指Load指令, 用于Load-Use处理)
@@ -64,6 +65,7 @@ module EX_stage (
         .cpu_clk        (cpu_clk),
         .cpu_rstn       (cpu_rstn),
         .suspend        (pl_suspend),
+        .pred_error     (pred_error),
         .valid_in       (id_valid),
 
         .wR_in          (id_wR),

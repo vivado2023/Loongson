@@ -98,6 +98,11 @@ module myCPU (
     wire [ 4:0] mem_wR       ;      // MEM阶段的目的寄存器
     wire [ 1:0] mem_wd_sel   ;      // MEM阶段的写回数据选择（选择ALU执行结果写回，或选择访存数据写回，etc.）
     wire [31:0] mem_wd       ;      // MEM阶段的待写回数据
+    wire        mem_is_br_jmp;      // MEM阶段是否是条件分支或直接跳转指令
+    wire        mem_br_jmp_f ;      // MEM阶段分支跳转指令实际是否会发生跳转
+    wire [ 1:0] mem_npc_op   ;      // MEM阶段的npc_op，用于控制下一条指令PC值的生成
+    wire        mem_alu_f    ;      // MEM阶段的标志位
+    wire [31:0] mem_rD1      ;      // MEM阶段的源寄存器1的值（仅用于分支指令计算分支目标地址）
     // WB Stage
     wire        wb_valid     ;      // WB阶段有效信号（有效表示当前有指令正处于WB阶段）
     wire [31:0] wb_pc        ;      // WB阶段的PC值
@@ -113,7 +118,7 @@ module myCPU (
         ififo_full_r <= ififo_full;
     end
 
-    wire pause_ifetch  = ififo_full;
+    wire pause_ifetch  = ififo_full && !pred_error;
     wire resume_ifetch = ififo_full_r && !ififo_full && ifetch_inst != 32'h0;
     
     BPU u_BPU (
@@ -124,10 +129,10 @@ module myCPU (
         .pred_target    (pred_target  ),
         .pred_error     (pred_error   ),
         // real dir. and target
-        .ex_valid       (ex_valid     ),
-        .ex_is_bj       (ex_is_br_jmp ),
-        .ex_pc          (ex_pc        ),
-        .real_taken     (ex_br_jmp_f  ),
+        .mem_valid      (mem_valid     ),
+        .mem_is_bj      (mem_is_br_jmp ),
+        .mem_pc         (mem_pc        ),
+        .real_taken     (mem_br_jmp_f  ),
         .real_target    (if_npc       )
     );
 
@@ -142,11 +147,11 @@ module myCPU (
         .pred_error     (pred_error   ),
         .pred_target    (pred_target  ),
         // From other stages
-        .ex_npc_op      (ex_npc_op    ),
-        .ex_pc          (ex_pc        ),
-        .ex_rD1         (ex_rD1       ),
-        .ex_ext         (ex_ext       ),
-        .ex_alu_f       (ex_alu_f     ),
+        .mem_npc_op     (mem_npc_op    ),
+        .mem_pc         (mem_pc        ),
+        .mem_rD1        (mem_rD1       ),
+        .mem_ext        (mem_ext       ),
+        .mem_alu_f      (mem_alu_f     ),
         // To IFIFO
         .if_valid       (if_valid     ),
         .if_pc          (if_pc        ),
@@ -228,6 +233,7 @@ module myCPU (
         .pl_suspend     (pl_suspend   ),
         .ex_suspend     (ex_suspend   ),
         .ldst_unalign   (ldst_unalign ),
+        .pred_error     (pred_error   ),
         // From ID
         .id_valid       (id_valid     ),
         .id_pc          (id_pc        ),
@@ -247,8 +253,6 @@ module myCPU (
         // To IF
         .ex_npc_op      (ex_npc_op    ),
         .ex_alu_f       (ex_alu_f     ),
-        .ex_is_br_jmp   (ex_is_br_jmp ),
-        .ex_br_jmp_f    (ex_br_jmp_f  ),
         // To ID
         .ex_is_ld_st    (ex_is_ld_st  ),
         // To MEM
@@ -263,6 +267,8 @@ module myCPU (
         .ex_wd_sel      (ex_wd_sel    ),
         .ex_ram_we      (ex_ram_we    ),
         .ex_ram_ext_op  (ex_ram_ext_op),
+        .ex_is_br_jmp   (ex_is_br_jmp ),
+        .ex_br_jmp_f    (ex_br_jmp_f  ),
         // Data Forward
         .ex_wd          (ex_wd        ),
         .ex_sel_ram     (ex_sel_ram   )
@@ -275,9 +281,11 @@ module myCPU (
         .pl_suspend     (pl_suspend   ),
         .ldst_suspend   (ldst_suspend ),
         .ldst_unalign   (ldst_unalign ),
+        .pred_error     (pred_error   ),
         // From EX
         .ex_valid       (ex_valid     ),
         .ex_pc          (ex_pc        ),
+        .ex_rD1         (ex_rD1       ),
         .ex_rD2         (ex_rD2       ),
         .ex_ext         (ex_ext       ),
         .ex_alu_C       (ex_alu_C     ),
@@ -286,6 +294,16 @@ module myCPU (
         .ex_wd_sel      (ex_wd_sel    ),
         .ex_ram_we      (ex_ram_we    ),
         .ex_ram_ext_op  (ex_ram_ext_op),
+        .ex_is_br_jmp   (ex_is_br_jmp ),
+        .ex_br_jmp_f    (ex_br_jmp_f  ),
+        .ex_npc_op      (ex_npc_op    ),
+        .ex_alu_f       (ex_alu_f     ),
+        // To IF
+        .mem_is_br_jmp  (mem_is_br_jmp ),
+        .mem_br_jmp_f   (mem_br_jmp_f  ),
+        .mem_npc_op     (mem_npc_op    ),
+        .mem_alu_f      (mem_alu_f     ),
+        .mem_rD1        (mem_rD1       ),
         // To WB
         .mem_valid      (mem_valid    ),
         .mem_pc         (mem_pc       ),
@@ -368,9 +386,9 @@ module myCPU (
     wire [31:0] debug_wdata      = daccess_wdata;       // 写数据
 
     // Branch & Jump
-    wire [31:0] debug_bj_pc      = ex_pc;                       // 确定跳转方向和目标地址的阶段的PC值（此处为EX阶段）
-    wire        debug_bj_taken   = ex_is_br_jmp & ex_br_jmp_f;  // 发生跳转时有效
-    wire [31:0] debug_bj_target  = if_npc;                      // 跳转时的目标地址
+    wire [31:0] debug_bj_pc      = mem_pc;                       // 确定跳转方向和目标地址的阶段的PC值（此处为MEM阶段）
+    wire        debug_bj_taken   = mem_is_br_jmp & mem_br_jmp_f; // 发生跳转时有效
+    wire [31:0] debug_bj_target  = if_npc;                       // 跳转时的目标地址
     ///////////////////////////////////////////////////////////////////////////
 
 endmodule

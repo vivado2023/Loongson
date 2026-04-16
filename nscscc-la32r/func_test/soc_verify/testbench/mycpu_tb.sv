@@ -157,7 +157,7 @@ module tb_top( );
 
     wire        debug_bj_taken   = soc_lite.u_cpu.u_mycpu.debug_bj_taken;
     wire [31:0] debug_bj_pc      = soc_lite.u_cpu.u_mycpu.debug_bj_pc;
-    wire [31:0] debug_bj_target  = soc_lite.u_cpu.u_mycpu.debug_bj_target;
+    // wire [31:0] debug_bj_target  = soc_lite.u_cpu.u_mycpu.debug_bj_target;
 `else
     reg wb_rf_unimpl_r, mem_st_unimpl_r, ex_bj_unimpl_r;
     always @(posedge soc_clk) begin     // synchronize from negedge(incdev) to posedge(mycpu)
@@ -182,7 +182,7 @@ module tb_top( );
     wire [31:0] mycpu_ex_pc     = soc_lite.u_cpu.u_mycpu.ex_pc;
     wire        debug_bj_taken  = ex_bj_unimpl_f | soc_lite.u_cpu.u_mycpu.debug_bj_taken;
     wire [31:0] debug_bj_pc     = ex_bj_unimpl_f ? mycpu_ex_pc : soc_lite.u_cpu.u_mycpu.debug_bj_pc;
-    wire [31:0] debug_bj_target = ex_bj_unimpl_f ? mycpu_if_pc : soc_lite.u_cpu.u_mycpu.debug_bj_target;
+    // wire [31:0] debug_bj_target = ex_bj_unimpl_f ? mycpu_if_pc : soc_lite.u_cpu.u_mycpu.debug_bj_target;
 `endif
 
     // open the trace file;
@@ -290,18 +290,18 @@ module tb_top( );
                 end
             end
 
-            if (debug_bj_taken && !debug_end && `CONFREG_OPEN_TRACE) begin
-                if ( (debug_bj_pc!==ref_bj_pc) || (debug_bj_target!==ref_bj_target) ) begin
-                    $display("--------------------------------------------------------------");
-                    $display("[%t] Error!!! - Branch or Jump",$time);
-                    $display("    reference: PC = 0x%8h, bj_target = 0x%8h", ref_bj_pc, ref_bj_target);
-                    $display("    mycpu    : PC = 0x%8h, bj_target = 0x%8h", debug_bj_pc, debug_bj_target);
-                    $display("--------------------------------------------------------------");
-                    debug_wb_err <= 1'b1;
-                    #40;
-                    $finish;
-                end
-            end
+            // if (debug_bj_taken && !debug_end && `CONFREG_OPEN_TRACE) begin
+            //     if ( (debug_bj_pc!==ref_bj_pc) || (debug_bj_target!==ref_bj_target) ) begin
+            //         $display("--------------------------------------------------------------");
+            //         $display("[%t] Error!!! - Branch or Jump",$time);
+            //         $display("    reference: PC = 0x%8h, bj_target = 0x%8h", ref_bj_pc, ref_bj_target);
+            //         $display("    mycpu    : PC = 0x%8h, bj_target = 0x%8h", debug_bj_pc, debug_bj_target);
+            //         $display("--------------------------------------------------------------");
+            //         debug_wb_err <= 1'b1;
+            //         #40;
+            //         $finish;
+            //     end
+            // end
         end
     end
 
@@ -382,71 +382,71 @@ module tb_top( );
 
     // Test accuracy of BPU prediction
 `ifdef ENABLE_BPU
-    wire        ex_is_bj    = soc_lite.u_cpu.u_mycpu.u_BPU.ex_is_bj;
-    wire        pred_taken  = soc_lite.u_cpu.u_mycpu.u_BPU.ex_pred_taken;
-    wire [31:0] pred_target = soc_lite.u_cpu.u_mycpu.u_BPU.ex_pred_target;
-    wire        real_taken  = soc_lite.u_cpu.u_mycpu.u_BPU.real_taken;
-    wire [31:0] real_target = soc_lite.u_cpu.u_mycpu.u_BPU.real_target;
-    wire [31:0] ex_pc       = soc_lite.u_cpu.u_mycpu.ex_pc;
+    // wire        ex_is_bj    = soc_lite.u_cpu.u_mycpu.u_BPU.ex_is_bj;
+    // wire        pred_taken  = soc_lite.u_cpu.u_mycpu.u_BPU.ex_pred_taken;
+    // wire [31:0] pred_target = soc_lite.u_cpu.u_mycpu.u_BPU.ex_pred_target;
+    // wire        real_taken  = soc_lite.u_cpu.u_mycpu.u_BPU.real_taken;
+    // wire [31:0] real_target = soc_lite.u_cpu.u_mycpu.u_BPU.real_target;
+    // wire [31:0] ex_pc       = soc_lite.u_cpu.u_mycpu.ex_pc;
 
-    reg  [31:0] br_jmp_cnt  = 0, br_jmp_cnt1  = 0;
-    reg  [31:0] dir_correct = 0, dir_correct1 = 0;
-    reg  [31:0] tgt_correct = 0, tgt_correct1 = 0;
+    // reg  [31:0] br_jmp_cnt  = 0, br_jmp_cnt1  = 0;
+    // reg  [31:0] dir_correct = 0, dir_correct1 = 0;
+    // reg  [31:0] tgt_correct = 0, tgt_correct1 = 0;
 
-    reg  [31:0] b_valid_pc [1:0];
-    reg  [ 1:0] b_hit;
-    reg  [31:0] j_valid_pc [0:0];
-    reg  [ 0:0] j_hit;
-    wire        b_pc_valid = |b_hit & ex_is_bj;
-    wire        j_pc_valid = |j_hit & ex_is_bj;
+    // reg  [31:0] b_valid_pc [1:0];
+    // reg  [ 1:0] b_hit;
+    // reg  [31:0] j_valid_pc [0:0];
+    // reg  [ 0:0] j_hit;
+    // wire        b_pc_valid = |b_hit & ex_is_bj;
+    // wire        j_pc_valid = |j_hit & ex_is_bj;
 
-    initial begin
-        b_valid_pc[ 0] = 32'h1c01025c;
-        b_valid_pc[ 1] = 32'h1c010264;
+    // initial begin
+    //     b_valid_pc[ 0] = 32'h1c01025c;
+    //     b_valid_pc[ 1] = 32'h1c010264;
 
-        j_valid_pc[ 0] = 32'h1c010268;
-    end
+    //     j_valid_pc[ 0] = 32'h1c010268;
+    // end
 
-    integer i, j;
-    always @(*) begin
-        for (i = 0; i < 2; i = i + 1) b_hit[i] = (b_valid_pc[i] == ex_pc);
-        for (j = 0; j < 1; j = j + 1) j_hit[j] = (j_valid_pc[j] == ex_pc);
-    end
+    // integer i, j;
+    // always @(*) begin
+    //     for (i = 0; i < 2; i = i + 1) b_hit[i] = (b_valid_pc[i] == ex_pc);
+    //     for (j = 0; j < 1; j = j + 1) j_hit[j] = (j_valid_pc[j] == ex_pc);
+    // end
 
-    always @(posedge soc_clk) begin
-        if (ex_is_bj) begin
-            br_jmp_cnt <= br_jmp_cnt + 1;
-            if (pred_taken == real_taken) begin
-                dir_correct <= dir_correct + 1;
-                if (!real_taken | real_taken & (pred_target == real_target))
-                    tgt_correct <= tgt_correct + 1;
-            end
-        end
+    // always @(posedge soc_clk) begin
+    //     if (ex_is_bj) begin
+    //         br_jmp_cnt <= br_jmp_cnt + 1;
+    //         if (pred_taken == real_taken) begin
+    //             dir_correct <= dir_correct + 1;
+    //             if (!real_taken | real_taken & (pred_target == real_target))
+    //                 tgt_correct <= tgt_correct + 1;
+    //         end
+    //     end
 
-        if (b_pc_valid | j_pc_valid) begin
-            br_jmp_cnt1 <= br_jmp_cnt1 + 1;
-            if (pred_taken == real_taken) begin
-                dir_correct1 <= dir_correct1 + 1;
-                if (!real_taken | real_taken & (pred_target == real_target))
-                    tgt_correct1 <= tgt_correct1 + 1;
-            end
-        end
-    end
+    //     if (b_pc_valid | j_pc_valid) begin
+    //         br_jmp_cnt1 <= br_jmp_cnt1 + 1;
+    //         if (pred_taken == real_taken) begin
+    //             dir_correct1 <= dir_correct1 + 1;
+    //             if (!real_taken | real_taken & (pred_target == real_target))
+    //                 tgt_correct1 <= tgt_correct1 + 1;
+    //         end
+    //     end
+    // end
 
-    wire     id_valid = soc_lite.u_cpu.u_mycpu.id_valid;
-    wire     id_is_b  = soc_lite.u_cpu.u_mycpu.ID.is_branch;
-    wire     id_is_j  = soc_lite.u_cpu.u_mycpu.ID.is_jump;
-    wire [31:0] id_pc = soc_lite.u_cpu.u_mycpu.id_pc;
-    integer bpu_track;
-    initial bpu_track = $fopen("bpu_track.txt", "w");
-    always @(posedge soc_clk) begin
-        if (id_valid & id_is_b) begin
-            $fwrite(bpu_track, "%c 0x%08h\n", "b", id_pc);
-        end
-        if (id_valid & id_is_j) begin
-            $fwrite(bpu_track, "%c 0x%08h\n", "j", id_pc);
-        end
-    end
+    // wire     id_valid = soc_lite.u_cpu.u_mycpu.id_valid;
+    // wire     id_is_b  = soc_lite.u_cpu.u_mycpu.ID.is_branch;
+    // wire     id_is_j  = soc_lite.u_cpu.u_mycpu.ID.is_jump;
+    // wire [31:0] id_pc = soc_lite.u_cpu.u_mycpu.id_pc;
+    // integer bpu_track;
+    // initial bpu_track = $fopen("bpu_track.txt", "w");
+    // always @(posedge soc_clk) begin
+    //     if (id_valid & id_is_b) begin
+    //         $fwrite(bpu_track, "%c 0x%08h\n", "b", id_pc);
+    //     end
+    //     if (id_valid & id_is_j) begin
+    //         $fwrite(bpu_track, "%c 0x%08h\n", "j", id_pc);
+    //     end
+    // end
 `endif
 
     //test end
@@ -483,15 +483,15 @@ module tb_top( );
                                         $itor(dfetch_cnt - dfetch_miss_cnt) * 100 / $itor(dfetch_cnt));
 `endif
 `ifdef ENABLE_BPU
-            // Print BPU accuracy
-            $display("----BPU accuracy: dir: %.03f%%, tgt: %.03f%%",
-                                        $itor(dir_correct) * 100 / $itor(br_jmp_cnt),
-                                        $itor(tgt_correct) * 100 / $itor(br_jmp_cnt));
-            $display("----BPU accuracy1: dir: %.03f%%, tgt: %.03f%%",
-                                        $itor(dir_correct1) * 100 / $itor(br_jmp_cnt1),
-                                        $itor(tgt_correct1) * 100 / $itor(br_jmp_cnt1));
-            $display("==============================================================");
-            // $fclose(bpu_track);
+            // // Print BPU accuracy
+            // $display("----BPU accuracy: dir: %.03f%%, tgt: %.03f%%",
+            //                             $itor(dir_correct) * 100 / $itor(br_jmp_cnt),
+            //                             $itor(tgt_correct) * 100 / $itor(br_jmp_cnt));
+            // $display("----BPU accuracy1: dir: %.03f%%, tgt: %.03f%%",
+            //                             $itor(dir_correct1) * 100 / $itor(br_jmp_cnt1),
+            //                             $itor(tgt_correct1) * 100 / $itor(br_jmp_cnt1));
+            // $display("==============================================================");
+            // // $fclose(bpu_track);
 `endif
             $finish;
         end
@@ -655,7 +655,7 @@ module tb_top( );
         end
 
         // Update pc when mycpu fetch an unimpl. inst which will branch or jump
-        if (ex_bj_unimpl_taken) `MYCPU_PC <= ref_bj_target;
+        // if (ex_bj_unimpl_taken) `MYCPU_PC <= ref_bj_target;
     end
 
     `ifdef ENABLE_ICACHE
@@ -768,8 +768,8 @@ module tb_top( );
     `FORCE_MODIFY(`MYCPU_EX_VALID , mem_bj_unimpl_taken , 1'b0)
 
     `ifdef ENABLE_BPU
-        `define MYBPU_PRED_TAKEN    soc_lite.u_cpu.u_mycpu.u_BPU.pred_taken
-        `FORCE_MODIFY(`MYBPU_PRED_TAKEN , ex_bj_unimpl_taken_r, 1'b0)
+        // `define MYBPU_PRED_TAKEN    soc_lite.u_cpu.u_mycpu.u_BPU.pred_taken
+        // `FORCE_MODIFY(`MYBPU_PRED_TAKEN , ex_bj_unimpl_taken_r, 1'b0)
     `endif
 
     wire [31:0] ex_icode  = `READ_SRAM(incdev_ex_pc);

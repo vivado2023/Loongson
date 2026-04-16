@@ -6,6 +6,7 @@ module EX_MEM (
     input  wire         cpu_clk,
     input  wire         cpu_rstn,
     input  wire         suspend,
+    input  wire         pred_error,
     input  wire         valid_in,
 
     input  wire[4:0]    wR_in,
@@ -19,6 +20,12 @@ module EX_MEM (
     input  wire[3:0]    ram_we_in,
     input  wire[2:0]    ram_ext_op_in,
 
+    input  wire         is_br_jmp_in,
+    input  wire         br_jmp_f_in,
+    input  wire [1:0]   npc_op_in,
+    input  wire         alu_f_in,
+    input  wire [31:0]  rD1_in,
+
     output reg          valid_out,
     output reg [4:0]    wR_out,
     output reg [31:0]   pc_out,
@@ -29,20 +36,31 @@ module EX_MEM (
     output reg          rf_we_out,
     output reg [1:0]    wd_sel_out,
     output reg [3:0]    ram_we_out,
-    output reg [2:0]    ram_ext_op_out
+    output reg [2:0]    ram_ext_op_out,
+
+    output reg          is_br_jmp_out,
+    output reg          br_jmp_f_out,
+    output reg [1:0]    npc_op_out,
+    output reg          alu_f_out,
+    output reg [31:0]   rD1_out
 );
 
     always @(posedge cpu_clk) begin
-        valid_out      <= !cpu_rstn ?  1'h0 : suspend ? valid_out      : valid_in     ;
-        wR_out         <= !cpu_rstn ?  5'h0 : suspend ? wR_out         : wR_in        ;
-        pc_out         <= !cpu_rstn ? 32'h0 : suspend ? pc_out         : pc_in        ;
-        alu_C_out      <= !cpu_rstn ? 32'h0 : suspend ? alu_C_out      : alu_C_in     ;
-        rD2_out        <= !cpu_rstn ? 32'h0 : suspend ? rD2_out        : rD2_in       ;
-        ext_out        <= !cpu_rstn ? 32'h0 : suspend ? ext_out        : ext_in       ;
-        rf_we_out      <= !cpu_rstn ?  1'h0 : suspend ? rf_we_out      : rf_we_in     ;
-        wd_sel_out     <= !cpu_rstn ?  2'h0 : suspend ? wd_sel_out     : wd_sel_in    ;
-        ram_we_out     <= !cpu_rstn ?  4'h0 : suspend ? ram_we_out     : ram_we_in    ;
-        ram_ext_op_out <= !cpu_rstn ?  3'h0 : suspend ? ram_ext_op_out : ram_ext_op_in;
+        valid_out      <= !cpu_rstn || pred_error ?  1'h0 : suspend ? valid_out      : valid_in     ;
+        wR_out         <= !cpu_rstn || pred_error ?  5'h0 : suspend ? wR_out         : wR_in        ;
+        pc_out         <= !cpu_rstn || pred_error ? 32'h0 : suspend ? pc_out         : pc_in        ;
+        alu_C_out      <= !cpu_rstn || pred_error ? 32'h0 : suspend ? alu_C_out      : alu_C_in     ;
+        rD2_out        <= !cpu_rstn || pred_error ? 32'h0 : suspend ? rD2_out        : rD2_in       ;
+        ext_out        <= !cpu_rstn || pred_error ? 32'h0 : suspend ? ext_out        : ext_in       ;
+        rf_we_out      <= !cpu_rstn || pred_error ?  1'h0 : suspend ? rf_we_out      : rf_we_in     ;
+        wd_sel_out     <= !cpu_rstn || pred_error ?  2'h0 : suspend ? wd_sel_out     : wd_sel_in    ;
+        ram_we_out     <= !cpu_rstn || pred_error ?  4'h0 : suspend ? ram_we_out     : ram_we_in    ;
+        ram_ext_op_out <= !cpu_rstn || pred_error ?  3'h0 : suspend ? ram_ext_op_out : ram_ext_op_in;
+        is_br_jmp_out  <= !cpu_rstn || pred_error ?  1'h0 : suspend ? is_br_jmp_out  : is_br_jmp_in ;
+        br_jmp_f_out   <= !cpu_rstn || pred_error ?  1'h0 : suspend ? br_jmp_f_out   : br_jmp_f_in  ;
+        npc_op_out     <= !cpu_rstn || pred_error ?  2'h0 : suspend ? npc_op_out     : npc_op_in    ;
+        alu_f_out      <= !cpu_rstn || pred_error ?  1'h0 : suspend ? alu_f_out      : alu_f_in     ;
+        rD1_out        <= !cpu_rstn || pred_error ? 32'h0 : suspend ? rD1_out        : rD1_in       ;
     end
 
 endmodule

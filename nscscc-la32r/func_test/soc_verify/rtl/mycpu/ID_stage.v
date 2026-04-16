@@ -50,6 +50,7 @@ module ID_stage (
         .cpu_clk    (cpu_clk    ),
         .cpu_rstn   (cpu_rstn   ),
         .suspend    (pl_suspend),
+        .pred_error (pred_error),
         .valid_in   (id_ifetch_valid),
         .pc_in      (ififo_pc   ),
         .valid_out  (id_valid   ),

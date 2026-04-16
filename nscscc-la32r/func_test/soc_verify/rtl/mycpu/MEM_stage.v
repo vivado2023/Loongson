@@ -7,11 +7,13 @@ module MEM_stage (
     input  wire         cpu_clk      ,
     // pipeline control
     input  wire         pl_suspend   ,      // 流水线暂停信号
+    input  wire         pred_error   ,      // 分支预测错误信号
     output wire         ldst_suspend ,      // 访存引起的流水线暂停信号
     input  wire         ldst_unalign ,      // 访存地址是否满足对齐条件
     // From EX
     input  wire         ex_valid     ,      // EX阶段有效信号
     input  wire [31:0]  ex_pc        ,      // EX阶段PC值
+    input  wire [31:0]  ex_rD1       ,      // EX阶段的源寄存器1的值
     input  wire [31:0]  ex_rD2       ,      // EX阶段的源寄存器2的值
     input  wire [31:0]  ex_ext       ,      // EX阶段的扩展后的立即数
     input  wire [31:0]  ex_alu_C     ,      // EX阶段的ALU运算结果
@@ -20,6 +22,16 @@ module MEM_stage (
     input  wire [ 1:0]  ex_wd_sel    ,      // EX阶段的写回数据选择（选择ALU执行结果写回，或选择访存数据写回，etc.）
     input  wire [ 3:0]  ex_ram_we    ,      // EX阶段的主存写使能信号（针对store指令）
     input  wire [ 2:0]  ex_ram_ext_op,      // EX阶段的读主存数据扩展op，用于控制主存读回数据的扩展方式（针对load指令）
+    input  wire         ex_is_br_jmp ,      // EX阶段是否是条件分支或直接跳转指令
+    input  wire         ex_br_jmp_f  ,      // EX阶段分支跳转指令实际是否会发生跳转
+    input  wire [ 1:0]  ex_npc_op    ,      // EX阶段的npc_op，用于控制下一条指令PC值的生成
+    input  wire         ex_alu_f     ,      // EX阶段的标志位
+    // To IF
+    output wire         mem_is_br_jmp,      // MEM阶段是否是条件分支或直接跳转指令
+    output wire         mem_br_jmp_f ,      // MEM阶段分支跳转指令实际是否会发生跳转
+    output wire [ 1:0]  mem_npc_op   ,      // MEM阶段的npc_op，用于控制下一条指令PC值的生成
+    output wire         mem_alu_f    ,      // MEM阶段的标志位
+    output wire [31:0]  mem_rD1      ,      // MEM阶段的源寄存器1的值（用于分支指令的比较）
     // To WB
     output wire         mem_valid    ,      // MEM阶段有效信号
     output wire [31:0]  mem_pc       ,      // MEM阶段PC值
@@ -63,6 +75,7 @@ module MEM_stage (
         .cpu_clk        (cpu_clk),
         .cpu_rstn       (cpu_rstn),
         .suspend        (pl_suspend),
+        .pred_error     (pred_error),
         .valid_in       (ex_valid),
 
         .wR_in          (ex_wR),
@@ -76,6 +89,12 @@ module MEM_stage (
         .ram_we_in      (ex_ram_we),
         .ram_ext_op_in  (ex_ram_ext_op),
 
+        .is_br_jmp_in    (ex_is_br_jmp),
+        .br_jmp_f_in     (ex_br_jmp_f),
+        .npc_op_in       (ex_npc_op),
+        .alu_f_in        (ex_alu_f),
+        .rD1_in          (ex_rD1),
+
         .valid_out      (mem_valid),
         .wR_out         (mem_wR),
         .pc_out         (mem_pc),
@@ -86,7 +105,13 @@ module MEM_stage (
         .rf_we_out      (mem_rf_we),
         .wd_sel_out     (mem_wd_sel),
         .ram_we_out     (mem_ram_we),
-        .ram_ext_op_out (mem_ram_ext_op)
+        .ram_ext_op_out (mem_ram_ext_op),
+
+        .is_br_jmp_out   (mem_is_br_jmp),
+        .br_jmp_f_out    (mem_br_jmp_f),
+        .npc_op_out      (mem_npc_op),
+        .alu_f_out       (mem_alu_f),
+        .rD1_out         (mem_rD1)
     );
 
     // Extend memory read data
