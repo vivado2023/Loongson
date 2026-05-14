@@ -26,8 +26,9 @@ module EX_stage (
     input  wire [ 3:0]  id_ram_we    ,      // ID阶段的主存写使能信号（针对store指令）
     input  wire [ 2:0]  id_ram_ext_op,      // ID阶段的读主存数据扩展op，用于控制主存读回数据的扩展方式（针对load指令）
     input  wire         id_is_br_jmp ,      // ID阶段是否是条件分支或直接跳转指令
+    input  wire         id_is_ld     ,      // ID阶段是否是Load指令
     // To IF
-    output wire         ex_is_ld_st  ,      // EX阶段是否是Load/Store指令
+    output wire         ex_is_ld  ,      // EX阶段是否是Load/Store指令
     // To MEM
     output wire         ex_valid     ,      // EX阶段有效信号
     output wire [31:0]  ex_pc        ,      // EX阶段PC值
@@ -54,7 +55,6 @@ module EX_stage (
     assign      ex_suspend = ((ex_alu_op == `ALU_MUL) || (ex_alu_op == `ALU_MULH) || (ex_alu_op == `ALU_MULH_U) || 
                               (ex_alu_op == `ALU_DIV) || (ex_alu_op == `ALU_DIV_U) || (ex_alu_op == `ALU_MOD) || (ex_alu_op == `ALU_MOD_U)) 
                               && !mul_div_done; 
-    assign      ex_is_ld_st = ex_valid & (ex_wd_sel == `WD_RAM);
     wire        ex_alua_sel, ex_alub_sel;
     wire [31:0] ex_alu_A = ex_alua_sel ? ex_rD1 : ex_pc;
     wire [31:0] ex_alu_B = ex_alub_sel ? ex_rD2 : ex_ext;
@@ -83,6 +83,7 @@ module EX_stage (
         .ram_we_in      (id_ram_we & {4{id_valid}}),
         .ram_ext_op_in  (id_ram_ext_op),
         .is_br_jmp_in   (id_is_br_jmp & id_valid),
+        .is_ld_in       (id_is_ld & id_valid),
 
         .valid_out      (ex_valid),
         .wR_out         (ex_wR),
@@ -99,7 +100,8 @@ module EX_stage (
         .alub_sel_out   (ex_alub_sel),
         .ram_we_out     (ex_ram_we),
         .ram_ext_op_out (ex_ram_ext_op),
-        .is_br_jmp_out  (ex_is_br_jmp)
+        .is_br_jmp_out  (ex_is_br_jmp),
+        .is_ld_out      (ex_is_ld)
     );
 
     ALU u_ALU (

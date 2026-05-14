@@ -8,9 +8,10 @@ module ICache (
     // Interface to CPU
     input  wire         inst_rreq,      // CPU发起取指请求
     input  wire [31:0]  inst_addr,      // CPU的取指地址
-    output reg          inst_valid,     // 返回给CPU的指令有效信号
-    output reg  [31:0]  inst_out,       // 返回给CPU的指令
+    output reg  [ 1:0]  inst_valid,     // 返回给CPU的指令有效信号
+    output reg  [63:0]  inst_out,       // 返回给CPU的指令
     input  wire         pred_error,     // 预测错误信号
+    input  wire         pred_taken_sel, // 预测跳转的是哪条指令，1表示if_pc1跳转，否则为0
     // Interface to Read Bus
     input  wire         dev_rrdy,       // 总线是否能接收请求
     output reg  [ 3:0]  cpu_ren,        // 读请求使能
@@ -19,7 +20,10 @@ module ICache (
     input  wire [31:0]  dev_rdata       // 读请求返回的数据
 );
 
-`ifdef ENABLE_ICACHE
+`ifdef ENABLE_ICACHE //bug:pc值更新传到inst_addr_sel_r需要两个周期，current_state == TAG_CHECK时来不及
+
+    reg [ 1:0] temp_inst_valid;
+    reg [63:0] temp_inst_out;
 
     localparam INDEX_WID  = $clog2(`CACHE_BLK_NUM / 2);     // Cache块索引的位宽
     localparam OFFSET_WID = $clog2(`CACHE_BLK_LEN) + 2;     // 块内偏移量的位宽
@@ -28,21 +32,49 @@ module ICache (
 
     // inst_rreq和inst_addr只有效一个CPU时钟，故需在inst_rreq有效时缓存inst_addr
     reg [31:0] inst_addr_r;
+    reg        pred_taken_sel_r;
     always @(posedge cpu_clk or negedge cpu_rstn) begin
-        if (!cpu_rstn)      inst_addr_r <= `PC_INIT_VAL;
-        else if (inst_rreq) inst_addr_r <= inst_addr;
+        if (!cpu_rstn) begin
+            inst_addr_r      <= `PC_INIT_VAL;
+            pred_taken_sel_r <= 1'b0;
+        end 
+        else if (inst_rreq) begin
+            inst_addr_r      <= inst_addr;
+            pred_taken_sel_r <= pred_taken_sel;
+        end 
+    end
+
+    wire [31:0] inst_addr1   = inst_addr;
+    wire [31:0] inst_addr2   = inst_addr + 32'd4;
+    wire [31:0] inst_addr_r1 = inst_addr_r;
+    wire [31:0] inst_addr_r2 = inst_addr_r + 32'd4;
+
+    wire same_block = (inst_addr_r1[31:OFFSET_WID] == inst_addr_r2[31:OFFSET_WID]); // 判断if_pc1和if_pc2是否在同一个Cache块内
+
+    //选择信号，pc1处理完后处理pc2，替换掉inst_addr和inst_addr_r
+    wire [31:0] inst_addr_sel = pred_taken_sel_r ? inst_addr_r1 : 
+                                temp_inst_valid == 2'b10 && temp_inst_valid_target == 2'b11 ? inst_addr_r2 : inst_addr_r1;
+    
+    reg [31:0] inst_addr_sel_r;
+    always @(posedge cpu_clk or negedge cpu_rstn) begin
+        if (!cpu_rstn || pred_error)    begin
+            inst_addr_sel_r <= `PC_INIT_VAL;
+        end  
+        else if (inst_rreq_r || miss_hit || cwf_hit || hit0 || hit1) begin
+            inst_addr_sel_r <= inst_addr_sel;
+        end 
     end
 
     // 主存地址分解（变量的位宽最好使用上面的localparam常量来表示）
-    wire [TAG_WID-1:0]    tag_from_cpu = inst_addr_r[31:32-TAG_WID];     // 主存地址的TAG
-    wire [INDEX_WID-1:0]  cache_index  = inst_addr[32-TAG_WID-1:32-TAG_WID-INDEX_WID]; // 读新的块时用这个
-    wire [INDEX_WID-1:0]  cache_index_r= inst_addr_r[32-TAG_WID-1:32-TAG_WID-INDEX_WID]; // 写回用这个
-    wire [OFFSET_WID-1:0] offset       = inst_addr_r[OFFSET_WID-1:0];     // 32位字偏移量
+    wire [TAG_WID-1:0]    tag_from_cpu = inst_addr_sel_r[31:32-TAG_WID];     // 主存地址的TAG
+    wire [INDEX_WID-1:0]  cache_index  = inst_addr_sel[32-TAG_WID-1:32-TAG_WID-INDEX_WID]; // 读新的块时用这个
+    wire [INDEX_WID-1:0]  cache_index_r= inst_addr_sel_r[32-TAG_WID-1:32-TAG_WID-INDEX_WID]; // 写回用这个
+    wire [OFFSET_WID-1:0] offset       = inst_addr_sel_r[OFFSET_WID-1:0];     // 32位字偏移量
 
     wire [INDEX_WID-1:0] blk_addr;
 
-    assign blk_addr =((current_state == REFILL) ? cache_idx_wr : 
-                     ((current_state == WAIT)&&!pred_error ? cache_index_r : cache_index));
+    assign blk_addr =((current_state == REFILL)&&!pred_error ? cache_idx_wr : 
+                     ((current_state == WAIT2)&&!pred_error ? cache_index : cache_index));
 
     wire [BLK_WID-1:0] cache_line_r0;                                              // 从ICache存储体0读出的Cache块
     wire [BLK_WID-1:0] cache_line_r1;                                              // 从ICache存储体1读出的Cache块
@@ -103,6 +135,10 @@ module ICache (
             tag_from_cpu_wr <= tag_from_cpu;
             cache_idx_wr    <= cache_index_r;
         end
+        // else if(pred_error) begin
+        //     tag_from_cpu_wr <= tag_from_cpu;
+        //     cache_idx_wr    <= cache_index;
+        // end
     end
     // 缓存dev_rvalid
     reg dev_rvalid_r;
@@ -112,10 +148,16 @@ module ICache (
     end
 
     reg  cwf_new_req;           // 该信号有效表示REFILL状态下收到了CPU的取指请求
+    reg inst_rreq_r;           
     always @(posedge cpu_clk or negedge cpu_rstn) begin
-        if (!cpu_rstn)                                    cwf_new_req <= 1'b0;
-        else if ((current_state == REFILL) && inst_rreq)       cwf_new_req <= 1'b1;
-        else if (inst_valid && !inst_rreq || current_state != REFILL) cwf_new_req <= 1'b0; // 命中后没有新的请求, 或ICache已完成缺失处理退出了REFILL状态
+        if (!cpu_rstn) inst_rreq_r <= 1'b0;
+        else           inst_rreq_r <= inst_rreq;
+    end
+    always @(posedge cpu_clk or negedge cpu_rstn) begin
+        if (!cpu_rstn) cwf_new_req <= 1'b0;
+        else if(temp_inst_valid == 2'b11) cwf_new_req <= 1'b0; 
+        else if ((current_state == REFILL) && (inst_rreq_r || temp_inst_valid == 2'b10 && temp_inst_valid_target == 2'b11)) cwf_new_req <= 1'b1;
+        else if (inst_valid && !inst_rreq_r || current_state != REFILL || temp_inst_valid == temp_inst_valid_target || pred_error) cwf_new_req <= 1'b0; // 命中后没有新的请求, 或ICache已完成缺失处理退出了REFILL状态
     end
 
     wire        cwf_tag_match = cwf_new_req && (tag_from_cpu_wr == tag_from_cpu); // REFILL状态下收到的取指请求发生Cache块标签匹配
@@ -132,13 +174,13 @@ module ICache (
         else if (current_state == RD_MEM)  miss_offset <= offset[OFFSET_WID-1:2];
     end
 
-    wire miss_hit = (current_state == REFILL) && dev_rvalid_r && (recv_cnt-1 == offset[OFFSET_WID-1:2]) && !pred_error
+    wire miss_hit = (current_state == REFILL) && dev_rvalid_r && (recv_cnt-1 == miss_offset) && !pred_error
                     && (tag_from_cpu_wr == tag_from_cpu) && (cache_idx_wr == cache_index_r); 
 
     reg ld_st;
     always @(posedge cpu_clk or negedge cpu_rstn) begin
         if (!cpu_rstn)                                                 ld_st <= 1'b0;
-        else if((current_state == REFILL) && inst_valid && !inst_rreq) ld_st <= 1'b1;
+        else if((current_state == REFILL) && inst_valid && !inst_rreq) ld_st <= 1'b0;
         else if((current_state == TAG_CHECK) || (inst_rreq && !pred_error)) ld_st <= 1'b0;
     end
 
@@ -147,7 +189,8 @@ module ICache (
     localparam TAG_CHECK = 3'b001;
     localparam RD_MEM    = 3'b010;
     localparam REFILL    = 3'b011;
-    localparam WAIT      = 3'b100;
+    localparam WAIT1     = 3'b100;
+    localparam WAIT2     = 3'b101;
 
 //更新现态
     reg [2:0] current_state, next_state;
@@ -177,15 +220,17 @@ module ICache (
 //状态转移逻辑
     always @(*) begin
         case(current_state)
-            IDLE:      next_state = (inst_rreq || cwf_req_left)  ? TAG_CHECK : IDLE;
+            IDLE:      next_state = (inst_rreq || cwf_req_left || !pred_taken_sel_r)  ? TAG_CHECK : IDLE;
             TAG_CHECK: begin
                 if(pred_error) next_state = TAG_CHECK;
-                else if((hit0 | hit1) || ld_st) next_state = inst_rreq ? TAG_CHECK : IDLE;
-                else next_state = RD_MEM;
+                else if((hit0 | hit1) || ld_st) 
+                               next_state = (inst_rreq || !pred_taken_sel_r) ? TAG_CHECK : IDLE;
+                else           next_state = RD_MEM;
             end
             RD_MEM:    next_state = dev_rrdy                     ? REFILL    : RD_MEM;
-            REFILL:    next_state = (recv_cnt == `CACHE_BLK_LEN) ?  WAIT : REFILL;
-            WAIT:      next_state = TAG_CHECK;
+            REFILL:    next_state = (recv_cnt == `CACHE_BLK_LEN) ?  WAIT1 : REFILL;
+            WAIT1:      next_state = WAIT2;
+            WAIT2:      next_state = TAG_CHECK;
         endcase
     end
 
@@ -197,135 +242,223 @@ module ICache (
         end
         else if(current_state == RD_MEM && dev_rrdy) begin
             cpu_ren   <= 4'b1111;
-            cpu_raddr <= {inst_addr_r[31:OFFSET_WID],{OFFSET_WID{1'b0}}};
+            cpu_raddr <= {inst_addr_sel_r[31:OFFSET_WID],{OFFSET_WID{1'b0}}};
         end
         else cpu_ren  <= 4'b0;
     end
 
     always @(*) begin
         if (!cpu_rstn) begin
-            inst_valid = 1'b0;
-            inst_out   = 32'b0;
+            temp_inst_valid = 2'b0;
+            temp_inst_out   = 64'b0;
         end
         else if(pred_error) begin
-            inst_valid = 1'b0;
-            inst_out   = 32'b0;
+            temp_inst_valid = 2'b0;
+            temp_inst_out   = 64'b0;
         end
         else if(current_state == TAG_CHECK) begin
-            inst_valid = (hit0 | hit1) && !ld_st;
-            case(offset[OFFSET_WID-1:2])
-                3'd0: inst_out = hit_data_blk[31:0];
-                3'd1: inst_out = hit_data_blk[63:32];
-                3'd2: inst_out = hit_data_blk[95:64];
-                3'd3: inst_out = hit_data_blk[127:96];
-                3'd4: inst_out = hit_data_blk[159:128];
-                3'd5: inst_out = hit_data_blk[191:160];
-                3'd6: inst_out = hit_data_blk[223:192];
-                3'd7: inst_out = hit_data_blk[255:224];
-            endcase
+            if(!temp_inst_valid[1] && !ld_st) begin
+                temp_inst_valid = {(hit0 | hit1),1'b0};
+                case(offset[OFFSET_WID-1:2])
+                    3'd0: temp_inst_out[63:32] = hit_data_blk[31:0];
+                    3'd1: temp_inst_out[63:32] = hit_data_blk[63:32];
+                    3'd2: temp_inst_out[63:32] = hit_data_blk[95:64];
+                    3'd3: temp_inst_out[63:32] = hit_data_blk[127:96];
+                    3'd4: temp_inst_out[63:32] = hit_data_blk[159:128];
+                    3'd5: temp_inst_out[63:32] = hit_data_blk[191:160];
+                    3'd6: temp_inst_out[63:32] = hit_data_blk[223:192];
+                    3'd7: temp_inst_out[63:32] = hit_data_blk[255:224];
+                endcase
+            end
+            else if(temp_inst_valid == 2'b10 && !ld_st) begin
+                temp_inst_valid = {2{(hit0 | hit1)}};
+                case(offset[OFFSET_WID-1:2])
+                    3'd0: temp_inst_out[31:0] = hit_data_blk[31:0];
+                    3'd1: temp_inst_out[31:0] = hit_data_blk[63:32];
+                    3'd2: temp_inst_out[31:0] = hit_data_blk[95:64];
+                    3'd3: temp_inst_out[31:0] = hit_data_blk[127:96];
+                    3'd4: temp_inst_out[31:0] = hit_data_blk[159:128];
+                    3'd5: temp_inst_out[31:0] = hit_data_blk[191:160];
+                    3'd6: temp_inst_out[31:0] = hit_data_blk[223:192];
+                    3'd7: temp_inst_out[31:0] = hit_data_blk[255:224];
+                endcase
+            end
+            else temp_inst_valid = 2'b0;
         end
-        else if(current_state == REFILL && (cwf_hit || miss_hit)) begin
-            inst_valid = 1'b1;
-            case(offset[OFFSET_WID-1:2])
-                3'd0: begin
-                        case (recv_cnt)
-                        4'd1: inst_out = cache_line_data[`CACHE_BLK_LEN*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
-                        4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
-                        4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
-                        4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN-6)*32-1:(`CACHE_BLK_LEN-7)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-7)*32-1:(`CACHE_BLK_LEN-8)*32];
-                        endcase
-                    end 
-                3'd1: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
-                        4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
-                        4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-6)*32-1:(`CACHE_BLK_LEN-7)*32];
-                        endcase
-                    end
-                3'd2: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+2)*32-1:(`CACHE_BLK_LEN+1)*32];
-                        // 4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
-                        4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
-                        endcase
-                    end
-                3'd3: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+3)*32-1:(`CACHE_BLK_LEN+2)*32];
-                        // 4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN+2)*32-1:(`CACHE_BLK_LEN+1)*32];
-                        // 4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
-                        endcase
-                    end
-                3'd4: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+4)*32-1:(`CACHE_BLK_LEN+3)*32];
-                        // 4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN+3)*32-1:(`CACHE_BLK_LEN+2)*32];
-                        // 4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN+2)*32-1:(`CACHE_BLK_LEN+1)*32];
-                        // 4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
-                        endcase
-                    end
-                3'd5: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+5)*32-1:(`CACHE_BLK_LEN+4)*32];
-                        // 4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN+4)*32-1:(`CACHE_BLK_LEN+3)*32];
-                        // 4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN+3)*32-1:(`CACHE_BLK_LEN+2)*32];
-                        // 4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN+2)*32-1:(`CACHE_BLK_LEN+1)*32];
-                        // 4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
-                        endcase
-                    end
-                3'd6: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+6)*32-1:(`CACHE_BLK_LEN+5)*32];
-                        // 4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN+5)*32-1:(`CACHE_BLK_LEN+4)*32];
-                        // 4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN+4)*32-1:(`CACHE_BLK_LEN+3)*32];
-                        // 4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN+3)*32-1:(`CACHE_BLK_LEN+2)*32];
-                        // 4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN+2)*32-1:(`CACHE_BLK_LEN+1)*32];
-                        // 4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
-                        endcase
-                    end
-                3'd7: begin
-                        case (recv_cnt)
-                        // 4'd1: inst_out = cache_line_data[(`CACHE_BLK_LEN+7)*32-1:(`CACHE_BLK_LEN+6)*32];
-                        // 4'd2: inst_out = cache_line_data[(`CACHE_BLK_LEN+6)*32-1:(`CACHE_BLK_LEN+5)*32];
-                        // 4'd3: inst_out = cache_line_data[(`CACHE_BLK_LEN+5)*32-1:(`CACHE_BLK_LEN+4)*32];
-                        // 4'd4: inst_out = cache_line_data[(`CACHE_BLK_LEN+4)*32-1:(`CACHE_BLK_LEN+3)*32];
-                        // 4'd5: inst_out = cache_line_data[(`CACHE_BLK_LEN+3)*32-1:(`CACHE_BLK_LEN+2)*32];
-                        // 4'd6: inst_out = cache_line_data[(`CACHE_BLK_LEN+2)*32-1:(`CACHE_BLK_LEN+1)*32];
-                        // 4'd7: inst_out = cache_line_data[(`CACHE_BLK_LEN+1)*32-1:`CACHE_BLK_LEN*32];
-                        4'd8: inst_out = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
-                        endcase
-                    end
-            endcase
+        else if(current_state == REFILL) begin
+            if(!temp_inst_valid[1]) begin
+                if(cwf_hit || miss_hit) begin
+                    temp_inst_valid = 2'b10;
+                    case(offset[OFFSET_WID-1:2])
+                        3'd0: begin
+                            case (recv_cnt)
+                                4'd1: temp_inst_out[63:32] = cache_line_data[`CACHE_BLK_LEN*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd2: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd3: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd4: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd5: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                                4'd6: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-6)*32-1:(`CACHE_BLK_LEN-7)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-7)*32-1:(`CACHE_BLK_LEN-8)*32];
+                            endcase
+                        end 
+                        3'd1: begin
+                            case (recv_cnt)
+                                4'd2: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd3: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd4: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd5: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd6: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-6)*32-1:(`CACHE_BLK_LEN-7)*32];
+                            endcase
+                        end
+                        3'd2: begin
+                            case (recv_cnt)
+                                4'd3: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd4: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd5: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd6: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
+                            endcase
+                        end
+                        3'd3: begin
+                            case (recv_cnt)
+                                4'd4: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd5: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd6: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                            endcase
+                        end
+                        3'd4: begin
+                            case (recv_cnt)
+                                4'd5: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd6: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                            endcase
+                        end
+                        3'd5: begin
+                            case (recv_cnt)
+                                4'd6: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                            endcase
+                        end
+                        3'd6: begin
+                            case (recv_cnt)
+                                4'd7: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                            endcase
+                        end
+                        3'd7: begin
+                            case (recv_cnt)
+                                4'd8: temp_inst_out[63:32] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                            endcase
+                        end
+                    endcase                 
+                end
+            end
+            else if(temp_inst_valid_target == 2'b11 && temp_inst_valid == 2'b10) begin
+                if(cwf_hit || miss_hit) begin
+                    temp_inst_valid = 2'b11;
+                    case(offset[OFFSET_WID-1:2])
+                        3'd0: begin
+                            case (recv_cnt)
+                                4'd1: temp_inst_out[31:0] = cache_line_data[`CACHE_BLK_LEN*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd2: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd3: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd4: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd5: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                                4'd6: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-6)*32-1:(`CACHE_BLK_LEN-7)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-7)*32-1:(`CACHE_BLK_LEN-8)*32];
+                            endcase
+                        end 
+                        3'd1: begin
+                            case (recv_cnt)
+                                4'd2: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd3: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd4: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd5: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd6: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-6)*32-1:(`CACHE_BLK_LEN-7)*32];
+                            endcase
+                        end
+                        3'd2: begin
+                            case (recv_cnt)
+                                4'd3: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd4: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd5: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd6: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-5)*32-1:(`CACHE_BLK_LEN-6)*32];
+                            endcase
+                        end
+                        3'd3: begin
+                            case (recv_cnt)
+                                4'd4: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd5: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd6: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-4)*32-1:(`CACHE_BLK_LEN-5)*32];
+                            endcase
+                        end
+                        3'd4: begin
+                            case (recv_cnt)
+                                4'd5: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd6: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-3)*32-1:(`CACHE_BLK_LEN-4)*32];
+                            endcase
+                        end
+                        3'd5: begin
+                            case (recv_cnt)
+                                4'd6: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-2)*32-1:(`CACHE_BLK_LEN-3)*32];
+                            endcase
+                        end
+                        3'd6: begin
+                            case (recv_cnt)
+                                4'd7: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN-1)*32-1:(`CACHE_BLK_LEN-2)*32];
+                            endcase
+                        end
+                        3'd7: begin
+                            case (recv_cnt)
+                                4'd8: temp_inst_out[31:0] = cache_line_data[(`CACHE_BLK_LEN)*32-1:(`CACHE_BLK_LEN-1)*32];
+                            endcase
+                        end
+                    endcase
+                end
+            end
+            else temp_inst_valid = 2'b00;
         end
-        else inst_valid = 1'b0;
+        else temp_inst_valid = 2'b00;
+    end
+
+    wire [1:0] temp_inst_valid_target = pred_taken_sel_r ? 2'b10 : (same_block ? 2'b11 : 2'b10);
+    
+    always @(*) begin
+        if (!cpu_rstn) begin
+            inst_valid = 2'b00;
+            inst_out   = 64'b0;
+        end
+        else if(pred_error) begin
+            inst_valid = 2'b00;
+            inst_out   = 64'b0;
+        end
+        else if(temp_inst_valid == temp_inst_valid_target) begin
+            inst_valid = temp_inst_valid;
+            inst_out   = temp_inst_out;
+        end
+        else begin
+            inst_valid = 2'b00;
+        end
     end
 
 `else

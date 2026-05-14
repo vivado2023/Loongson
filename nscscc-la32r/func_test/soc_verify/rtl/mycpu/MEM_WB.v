@@ -7,6 +7,7 @@ module MEM_WB (
     input  wire         cpu_rstn,
     input  wire         suspend,
     input  wire         valid_in,
+    input  wire         flush,
 
     input  wire [ 4:0]  wR_in,
     input  wire [31:0]  pc_in,
@@ -29,14 +30,14 @@ module MEM_WB (
 );
 
     always @(posedge cpu_clk) begin
-        valid_out   <= !cpu_rstn ?  1'h0 : suspend ? valid_out   : valid_in  ;
-        wR_out      <= !cpu_rstn ?  5'h0 : suspend ? wR_out      : wR_in     ;
-        pc_out      <= !cpu_rstn ? 32'h0 : suspend ? pc_out      : pc_in     ;
-        alu_C_out   <= !cpu_rstn ? 32'h0 : suspend ? alu_C_out   : alu_C_in  ;
-        ram_ext_out <= !cpu_rstn ? 32'h0 : suspend ? ram_ext_out : ram_ext_in;
-        ext_out     <= !cpu_rstn ? 32'h0 : suspend ? ext_out     : ext_in    ;
-        rf_we_out   <= !cpu_rstn ?  1'h0 : suspend ? 1'b0        : rf_we_in  ;
-        wd_sel_out  <= !cpu_rstn ?  2'h0 : suspend ? wd_sel_out  : wd_sel_in ;
+        valid_out   <= !cpu_rstn || flush ?  1'h0 : suspend ? valid_out   : valid_in  ;
+        wR_out      <= !cpu_rstn || flush ?  5'h0 : suspend ? wR_out      : wR_in     ;
+        pc_out      <= !cpu_rstn || flush ? 32'h0 : suspend ? pc_out      : pc_in     ;
+        alu_C_out   <= !cpu_rstn || flush ? 32'h0 : suspend ? alu_C_out   : alu_C_in  ;
+        ram_ext_out <= !cpu_rstn || flush ? 32'h0 : suspend ? ram_ext_out : ram_ext_in;
+        ext_out     <= !cpu_rstn || flush ? 32'h0 : suspend ? ext_out     : ext_in    ;
+        rf_we_out   <= !cpu_rstn || flush ?  1'h0 : suspend ? 1'b0        : rf_we_in  ;
+        wd_sel_out  <= !cpu_rstn || flush ?  2'h0 : suspend ? wd_sel_out  : wd_sel_in ;
     end
 
 endmodule

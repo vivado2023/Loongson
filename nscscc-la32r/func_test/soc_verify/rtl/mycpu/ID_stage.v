@@ -3,29 +3,23 @@
 `include "defines.vh"
 
 module ID_stage (
-    input  wire         cpu_rstn     ,
-    input  wire         cpu_clk      ,
-    // pipeline control
-    input  wire         pl_suspend   ,      // 流水线暂停
-    input  wire         pred_error   ,      // 分支预测错误的标志位
     input  wire         fd_rD1_sel   ,      // 源操作数1选择信号（选择前递数据或源寄存器1的值）
     input  wire [31:0]  fd_rD1       ,      // 前递到ID阶段的源操作数1
     input  wire         fd_rD2_sel   ,      // 源操作数2选择信号（选择前递数据或源寄存器1的值）
     input  wire [31:0]  fd_rD2       ,      // 前递到ID阶段的源操作数2
     // From IFIFO
-    input  wire         ififo_valid  ,      // IF阶段有效信号
+    // input  wire         ififo_valid  ,      // IF阶段有效信号
     input  wire [31:0]  ififo_inst   ,      // IF阶段PC值
-    input  wire [31:0]  ififo_pc     ,      // IF阶段PC值
-    // From EX and WB
-    input  wire         wb_rf_we     ,      // WB阶段的寄存器写使能
-    input  wire [ 4:0]  wb_wR        ,      // WB阶段的目的寄存器
-    input  wire [31:0]  wb_wd        ,      // WB阶段的写回数据
-    input  wire         ex_is_ld_st  ,      // EX阶段是否是Load/Store指令
-    // To IFIFO
-    output wire         id_ifetch_valid,      // ID阶段取值有效信号（用于控制IFIFO是否可以弹出下一条指令）
+    // input  wire [31:0]  ififo_pc     ,      // IF阶段PC值
+    // // From EX and WB
+    // input  wire         wb_rf_we     ,      // WB阶段的寄存器写使能
+    // input  wire [ 4:0]  wb_wR        ,      // WB阶段的目的寄存器
+    // input  wire [31:0]  wb_wd        ,      // WB阶段的写回数据
+    // From RF
+    input  wire [31:0]  id_rD1          ,      // 从RF读取的源操作数1
+    input  wire [31:0]  id_rD2          ,      // 从RF读取的源操作数2
     // To EX
-    output wire         id_valid     ,      // ID阶段有效信号
-    output wire [31:0]  id_pc        ,      // ID阶段PC值
+    // output wire [31:0]  id_pc        ,      // ID阶段PC值
     output wire [ 1:0]  id_npc_op    ,      // ID阶段的npc_op，用于控制下一条指令PC值的生成
     output reg  [31:0]  id_ext       ,      // ID阶段的扩展后的立即数
     output wire [31:0]  id_real_rD1  ,      // ID阶段的源操作数1的实际值
@@ -39,28 +33,15 @@ module ID_stage (
     output wire [ 3:0]  id_ram_we    ,      // ID阶段的主存写使能信号（针对store指令）
     output wire [ 2:0]  id_ram_ext_op,      // ID阶段的读主存数据扩展op，用于控制主存读回数据的扩展方式（针对load指令）
     output wire         id_is_br_jmp ,      // ID阶段是否是条件分支或直接跳转指令
+    output wire         id_is_ld     ,      // ID阶段是否是Load指令
+    output wire         id_is_st     ,      // ID阶段是否是Store指令
+    // output wire         id_is_mul_div,      // ID阶段是否是乘除指令
     // Data Forward
     output wire [ 4:0]  id_rR1       ,      // 从指令码中解析出源寄存器1的编号/地址
     output wire         id_rR1_re    ,      // ID阶段的源寄存器1读标志信号（有效时表示指令需要从源寄存器1读取操作数）
     output wire [ 4:0]  id_rR2       ,      // 从指令码中解析出源寄存器2的编号/地址
     output wire         id_rR2_re          // ID阶段的源寄存器2读标志信号（有效时表示指令需要从源寄存器2读取操作数）
 );
-
-    IF_ID u_IF_ID (
-        .cpu_clk    (cpu_clk    ),
-        .cpu_rstn   (cpu_rstn   ),
-        .suspend    (pl_suspend),
-        .pred_error (pred_error),
-        .valid_in   (id_ifetch_valid),
-        .pc_in      (ififo_pc   ),
-        .valid_out  (id_valid   ),
-        .pc_out     (id_pc      )
-    );
-
-    wire id_is_ld_st  ;  // ID阶段是否是Load/Store指令
-    wire id_is_mul_div;  // ID阶段是否是乘除指令
-
-    assign id_ifetch_valid = !pred_error && !pl_suspend && !id_is_ld_st && !id_is_mul_div && !ex_is_ld_st && ififo_valid;
 
 /************************************************************/
 //指令解码
@@ -173,7 +154,7 @@ module ID_stage (
                        {5{B}} & `ALU_B;
 
 /*确定源操作数相关*/
-wire [31:0] id_rD1, id_rD2;
+
 //确定源操作数1地址（rj）（只针对通用寄存器）
     assign id_rR1 = !LU12I_W ? ififo_inst[9:5] : 5'h0;
 //确定源操作数1读使能：除PCADDU12I指令，都需要从寄存器读取源操作数1
@@ -199,8 +180,9 @@ wire [31:0] id_rD1, id_rD2;
     assign id_rf_we = TYPE_3R | TYPE_2RI5 | TYPE_2RI12 | PCADDU12I | LU12I_W | LOAD | JIRL | BL;
 
 /*确定主存相关指令*/
-//确定是否是Load/Store指令
-    assign id_is_ld_st = id_valid && (LOAD | STORE);
+//确定是否是Load指令
+    assign id_is_ld = LOAD;
+    assign id_is_st = STORE;
 //控制主存读回数据的扩展方式（针对load指令）
     assign id_ram_ext_op = {3{LD_H}} & `RAM_EXT_H |
                            {3{LD_HU}}& `RAM_EXT_HU|
@@ -215,9 +197,9 @@ wire [31:0] id_rD1, id_rD2;
 
 
 /*其他*/
-//npc_op的生成逻辑：如果是TYPE_3R、PCADDU12I、LOAD或STORE指令，则npc_op为`NPC_PC4
-    wire NPC_OP_PC4  = TYPE_3R | TYPE_2RI5 | TYPE_2RI12 | PCADDU12I | LU12I_W | LOAD | STORE;
-    assign id_npc_op = {2{NPC_OP_PC4}} & `NPC_PC4 |
+//npc_op的生成逻辑：如果是TYPE_3R、PCADDU12I、LOAD或STORE指令，则npc_op为`NPC_PC8
+    wire NPC_OP_PC8  = TYPE_3R | TYPE_2RI5 | TYPE_2RI12 | PCADDU12I | LU12I_W | LOAD | STORE;
+    assign id_npc_op = {2{NPC_OP_PC8}} & `NPC_PC8 |
                        {2{TYPE_2RI16}} & `NPC_B16 |
                        {2{JIRL}}       & `NPC_J |
                        {2{B | BL}}     & `NPC_B26 ; 
@@ -228,22 +210,22 @@ wire [31:0] id_rD1, id_rD2;
 
     assign id_is_br_jmp = TYPE_2RI16 | JIRL | B | BL;
 
-    assign id_is_mul_div =  id_valid && (MUL_W | MULH_W | MULH_WU | DIV_W | DIV_WU | MOD_W | MOD_WU);
+    // assign id_is_mul_div =  id_valid && (MUL_W | MULH_W | MULH_WU | DIV_W | DIV_WU | MOD_W | MOD_WU);
 
 
-/************************************************************/
-//通用寄存器堆
-/************************************************************/
-    RF u_RF(
-        .cpu_clk    (cpu_clk ),
-        .rR1        (id_rR1  ),
-        .rR2        (id_rR2  ),
-        .we         (wb_rf_we),
-        .wR         (wb_wR   ),
-        .wD         (wb_wd   ),
-        .rD1        (id_rD1  ),
-        .rD2        (id_rD2  )
-    );
+// /************************************************************/
+// //通用寄存器堆
+// /************************************************************/
+//     RF u_RF(
+//         .cpu_clk    (cpu_clk ),
+//         .rR1        (id_rR1  ),
+//         .rR2        (id_rR2  ),
+//         .we         (wb_rf_we),
+//         .wR         (wb_wR   ),
+//         .wD         (wb_wd   ),
+//         .rD1        (id_rD1  ),
+//         .rD2        (id_rD2  )
+//     );
 
 
 /************************************************************/

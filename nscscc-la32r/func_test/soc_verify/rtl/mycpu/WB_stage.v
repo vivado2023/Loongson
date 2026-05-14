@@ -7,6 +7,8 @@ module WB_stage (
     input  wire         cpu_clk      ,
     // pipeline control
     input  wire         pl_suspend   ,      // 流水线暂停信号
+    input  wire         pred_error   ,      // 分支预测错误信号
+    input  wire         error_from1  ,      // 分支预测错误是否来自if_pc1
     // From MEM
     input  wire         mem_valid    ,      // MEM阶段有效信号
     input  wire [31:0]  mem_pc       ,      // MEM阶段的PC值
@@ -30,11 +32,13 @@ module WB_stage (
     wire [31:0] wb_ext;
     wire [ 1:0] wb_wd_sel;
 
+    wire flush = pred_error && error_from1;
 
     MEM_WB u_MEM_WB(
         .cpu_clk        (cpu_clk),
         .cpu_rstn       (cpu_rstn),
         .suspend        (pl_suspend),
+        .flush          (flush),
         .valid_in       (mem_valid),
 
         .wR_in          (mem_wR),

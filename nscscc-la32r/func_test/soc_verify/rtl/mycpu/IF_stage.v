@@ -9,21 +9,16 @@ module IF_stage (
     // 来自分支预测器的信号
     input  wire         pred_error   ,      // 分支预测错误的标志位
     input  wire [31:0]  pred_target  ,      // 预测的下一条指令的地址
-    // 来自其他阶段的信号
-    input  wire [ 1:0]  mem_npc_op    ,      // MEM阶段的npc_op，用于控制下一条指令PC值的生成
-    input  wire [31:0]  mem_pc        ,      // MEM阶段的PC值
-    input  wire [31:0]  mem_rD1       ,      // MEM阶段的源寄存器1的值
-    input  wire [31:0]  mem_ext       ,      // MEM阶段的扩展后的立即数
-    input  wire         mem_alu_f     ,      // MEM阶段的标志位
+    // form if_npc
+    input  wire [31:0]  if_npc       ,      // IF阶段的下一条指令PC值
     // To ID
     output wire         if_valid     ,      // IF阶段有效信号
     output wire [31:0]  if_pc        ,      // IF阶段PC值
     output reg  [31:0]  if_pc_r      ,      // IF阶段的PC值，延时一个周期，保证和取到的指令一起给到IFIFO
-    output wire [31:0]  if_npc       ,      // 实际的下一条指令的地址
     // Instruction Fetch Interface
     output wire         ifetch_rreq  ,      // 取指请求信号
     output wire [31:0]  ifetch_addr  ,      // 取指地址
-    input  wire         ifetch_valid        // 指令有效信号
+    input  wire [ 1:0]  ifetch_valid        // 指令有效信号
 );
 
     reg  rstn_r;
@@ -40,7 +35,7 @@ module IF_stage (
     assign      if_pc = (pred_error) ? if_npc : pc_reg;
     
     assign ifetch_rreq = !pause_ifetch & (first_req    |    // 复位后首次取指
-                                          ifetch_valid |    // 上一条已取回, 同时立即取下一条
+                                          ifetch_valid[1] | // 上一条已取回, 同时立即取下一条
                                           pred_error   |    // 分支预测错误, 立即用正确的地址取指
                                           resume_ifetch);   // 数据访存或乘除运算结束, 继续取指
     assign ifetch_addr = if_pc;
@@ -54,15 +49,5 @@ module IF_stage (
         .pc         (pc_reg     )
     );
 
-    NPC u_NPC (
-        .cpu_clk    (cpu_clk    ),
-        .cpu_rstn   (cpu_rstn   ),
-        .npc_op     (mem_npc_op  ),
-        .mem_pc     (mem_pc      ),
-        .rj         (mem_rD1     ),
-        .offset     (mem_ext     ),
-        .br         (mem_alu_f   ), 
-        .npc        (if_npc     )
-    );
 
 endmodule

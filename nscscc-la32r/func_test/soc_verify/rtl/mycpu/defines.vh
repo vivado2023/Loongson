@@ -11,7 +11,7 @@
 
 `define PC_INIT_VAL 32'h1C000000
 
-`define NPC_PC4     2'b00
+`define NPC_PC8     2'b00
 `define NPC_B16     2'b01
 `define NPC_J       2'b10
 `define NPC_B26     2'b11

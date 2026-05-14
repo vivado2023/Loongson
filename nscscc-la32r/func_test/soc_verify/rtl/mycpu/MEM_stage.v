@@ -10,6 +10,7 @@ module MEM_stage (
     input  wire         pred_error   ,      // 分支预测错误信号
     output wire         ldst_suspend ,      // 访存引起的流水线暂停信号
     input  wire         ldst_unalign ,      // 访存地址是否满足对齐条件
+    output reg          mem_is_ld_st ,      // MEM阶段是否是load/store指令
     // From EX
     input  wire         ex_valid     ,      // EX阶段有效信号
     input  wire [31:0]  ex_pc        ,      // EX阶段PC值
@@ -58,17 +59,16 @@ module MEM_stage (
     wire [ 3:0] mem_ram_we;
     wire        ldst_done;
 
-    reg    mem_is_ld_st;    // MEM Stage is load or store
     assign ldst_done    = mem_is_ld_st & (daccess_valid | daccess_wresp);
     assign ldst_suspend = mem_is_ld_st & !ldst_done;
 
     always @(posedge cpu_clk or negedge cpu_rstn) begin
         if (!cpu_rstn)
             mem_is_ld_st <= 1'b0;
-        else if (daccess_valid | daccess_wresp)
-            mem_is_ld_st <= 1'b0;
         else if (ex_valid & (ex_wd_sel == `WD_RAM) & !ldst_unalign)
             mem_is_ld_st <= 1'b1;
+        else if (daccess_valid | daccess_wresp)
+            mem_is_ld_st <= 1'b0;
     end
 
     EX_MEM u_EX_MEM (

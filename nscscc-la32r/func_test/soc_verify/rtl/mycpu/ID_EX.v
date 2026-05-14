@@ -24,6 +24,7 @@ module ID_EX (
     input  wire [ 3:0]  ram_we_in,
     input  wire [ 2:0]  ram_ext_op_in,
     input  wire         is_br_jmp_in,
+    input  wire         is_ld_in,
 
     output reg          valid_out,
     output reg  [ 4:0]  wR_out,
@@ -40,7 +41,8 @@ module ID_EX (
     output reg          alub_sel_out,
     output reg  [ 3:0]  ram_we_out,
     output reg  [ 2:0]  ram_ext_op_out,
-    output reg          is_br_jmp_out
+    output reg          is_br_jmp_out,
+    output reg          is_ld_out
 );
 
     always @(posedge cpu_clk) begin
@@ -59,6 +61,7 @@ module ID_EX (
         ram_we_out     <= !cpu_rstn || pred_error ?  4'h0 : suspend ? ram_we_out     : ram_we_in;
         ram_ext_op_out <= !cpu_rstn || pred_error ?  3'h0 : suspend ? ram_ext_op_out : ram_ext_op_in;
         is_br_jmp_out  <= !cpu_rstn || pred_error ?  1'h0 : suspend ? is_br_jmp_out  : is_br_jmp_in;
+        is_ld_out      <= !cpu_rstn || pred_error ?  1'h0 : suspend ? is_ld_out      : is_ld_in;
     end
 
 endmodule

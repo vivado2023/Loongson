@@ -23,9 +23,11 @@ module mycpu_top(
     // ICache Interface
     wire        cpu2ic_rreq  ;
     wire [31:0] cpu2ic_addr  ;
-    wire        ic2cpu_valid ;
-    wire [31:0] ic2cpu_inst  ;
+    wire [ 1:0] ic2cpu_valid ;
+    wire [63:0] ic2cpu_inst  ;
     wire        cpu2ic_pderr ;
+    wire [ 1:0] pred_taken_sel;
+
 
     wire        dev2ic_rrdy  ;
     wire [ 3:0] ic2dev_ren   ;
@@ -61,6 +63,7 @@ module mycpu_top(
         .ifetch_valid   (ic2cpu_valid),
         .ifetch_inst    (ic2cpu_inst ),
         .pred_error     (cpu2ic_pderr),
+        .pred_taken_sel (pred_taken_sel),
         // Data Access Interface
         .daccess_ren    (cpu2dc_ren  ),
         .daccess_addr   (cpu2dc_addr ),
@@ -80,6 +83,7 @@ module mycpu_top(
         .inst_valid     (ic2cpu_valid ),
         .inst_out       (ic2cpu_inst  ),
         .pred_error     (cpu2ic_pderr ),
+        .pred_taken_sel (pred_taken_sel),
         // Interface to Bus
         .dev_rrdy       (dev2ic_rrdy  ),
         .cpu_ren        (ic2dev_ren   ),
